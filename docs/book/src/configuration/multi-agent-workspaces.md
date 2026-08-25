@@ -28,8 +28,16 @@ panel. It is a cycle rather than a picker because the profile list is short and
 user-defined, and a second modal on top of a modal earns nothing for a list that
 is usually two entries long.
 
-To pin a non-primary agent, address it by label from the CLI:
-`wsx agent profile --agent claude#2 local-qwen`.
+An agent added to a pinned workspace **inherits that workspace's model**, so
+pressing "add" in a workspace on a local endpoint does not quietly start a
+second agent somewhere else. To give one a model of its own — which is the whole
+reason this is stored per instance rather than per workspace — address it by
+label:
+
+```bash
+wsx agent profile --agent claude#2 some-other-profile
+wsx agent profile --agent claude#2 --clear
+```
 
 From the CLI, the equivalent of the panel's "add" is:
 

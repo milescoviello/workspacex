@@ -773,6 +773,14 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             let agent = crate::pty::session::AgentKind::from_str_or_default(Some(&kind));
             let inst = store.add_workspace_agent(ws.id, agent)?;
             println!("added {}", inst.label());
+            // The new agent inherited the workspace's model. If that carries an
+            // endpoint this agent cannot reach, say so here for the same reason
+            // the pin paths do — this is the moment someone is present to hear
+            // it.
+            if let Some(profile) = inst.model_profile.as_deref() {
+                println!("  model: {profile} (inherited)");
+                warn_if_endpoint_unusable(&store, profile, agent);
+            }
         }
         CliAction::StatusSet { state, message } => {
             let parsed = crate::data::store::ReportedState::parse(&state).ok_or_else(|| {

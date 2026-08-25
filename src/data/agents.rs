@@ -110,11 +110,37 @@ impl Store {
             rusqlite::params![ws.0, agent.store_value()],
             |r| r.get(0),
         )?;
+        // A new agent joins the workspace's model, not the machine's default.
+        // Someone who pinned this workspace to a local endpoint did so for the
+        // work, not for one process — and an added agent that quietly went
+        // somewhere else would cost money without saying so.
+        //
+        // Done here rather than at the call sites because there are three of
+        // them (the CLI, and both add paths in the agents panel), and missing
+        // one would make the behaviour depend on which button was pressed. Use
+        // `set_instance_model_profile` afterwards to give an instance a model
+        // of its own — which is the point of storing this per instance.
+        let inherited = self
+            .primary_instance_id(ws)?
+            .and_then(|id| self.workspace_agents_by_id(id).ok().flatten());
+        let (model, provider, model_profile) = match inherited {
+            Some(p) => (p.model, p.provider, p.model_profile),
+            None => (None, None, None),
+        };
         let now = now_ms();
         self.conn().execute(
-            "INSERT INTO workspace_agents (workspace_id, agent, ordinal, is_primary, created_at)
-             VALUES (?1, ?2, ?3, 0, ?4)",
-            rusqlite::params![ws.0, agent.store_value(), next, now],
+            "INSERT INTO workspace_agents
+             (workspace_id, agent, ordinal, is_primary, created_at, model, provider, model_profile)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                ws.0,
+                agent.store_value(),
+                next,
+                now,
+                model,
+                provider,
+                model_profile
+            ],
         )?;
         Ok(AgentInstance {
             id: AgentInstanceId(self.conn().last_insert_rowid()),
@@ -124,9 +150,9 @@ impl Store {
             is_primary: false,
             session_ref: None,
             created_at: now,
-            model: None,
-            provider: None,
-            model_profile: None,
+            model,
+            provider,
+            model_profile,
         })
     }
 
@@ -382,6 +408,51 @@ mod store_tests {
         let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
         assert_eq!(row.model, None, "blank must read as unset, not as a model");
         assert_eq!(row.provider, None);
+    }
+
+    /// An agent added to a pinned workspace joins that workspace's model.
+    /// Otherwise pressing "add" in the agents panel silently starts a second
+    /// agent somewhere else — which is money, quietly.
+    #[test]
+    fn an_added_agent_inherits_the_workspaces_model() {
+        let store = Store::open_in_memory().unwrap();
+        let ws = seed_ws_with_primary(&store);
+        let primary = store.primary_instance_id(ws).unwrap().unwrap();
+        store
+            .set_instance_model_profile(primary, Some("local"))
+            .unwrap();
+        store
+            .set_instance_model(primary, Some("qwen3.8-27b"), Some("prov"))
+            .unwrap();
+
+        let added = store.add_workspace_agent(ws, AgentKind::Codex).unwrap();
+        assert_eq!(added.model_profile.as_deref(), Some("local"));
+        assert_eq!(added.model.as_deref(), Some("qwen3.8-27b"));
+        assert_eq!(added.provider.as_deref(), Some("prov"));
+
+        // …and it survives a round-trip, not just the returned struct.
+        let read_back = store.workspace_agents_by_id(added.id).unwrap().unwrap();
+        assert_eq!(read_back.model_profile.as_deref(), Some("local"));
+
+        // Per-instance divergence is still possible — that is the whole reason
+        // this lives on the instance row rather than on the workspace.
+        store
+            .set_instance_model_profile(added.id, Some("other"))
+            .unwrap();
+        let diverged = store.workspace_agents_by_id(added.id).unwrap().unwrap();
+        assert_eq!(diverged.model_profile.as_deref(), Some("other"));
+        let untouched = store.workspace_agents_by_id(primary).unwrap().unwrap();
+        assert_eq!(untouched.model_profile.as_deref(), Some("local"));
+    }
+
+    /// An unpinned workspace hands nothing down, rather than inventing a pin.
+    #[test]
+    fn an_added_agent_inherits_nothing_from_an_unpinned_workspace() {
+        let store = Store::open_in_memory().unwrap();
+        let ws = seed_ws_with_primary(&store);
+        let added = store.add_workspace_agent(ws, AgentKind::Codex).unwrap();
+        assert_eq!(added.model_profile, None);
+        assert_eq!(added.model, None);
     }
 
     #[test]
