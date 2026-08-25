@@ -17,6 +17,50 @@ use crate::pty::session::RenameContext;
 use portable_pty::CommandBuilder;
 use std::path::Path;
 
+/// The model and provider an agent should spawn with, resolved from its
+/// `workspace_agents` row before the spawn.
+///
+/// A `None` field means no choice was recorded for that instance, and
+/// resolution falls back to the ambient `WSX_*_MODEL` / `WSX_*_PROVIDER`
+/// environment. That fallback is the behaviour that predates migration 23 and
+/// is kept so setups which export those variables before launching the TUI
+/// keep working unchanged.
+///
+/// The row wins over the environment, not the other way round: the row is a
+/// per-instance choice while the environment is process-wide, so the reverse
+/// order would let one exported variable silently override every workspace's
+/// individually pinned model — which is the bug this type exists to end.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelSelection {
+    pub model: Option<String>,
+    pub provider: Option<String>,
+}
+
+/// Trim and treat blank as absent. A shell expands `export FOO=$UNSET` to "",
+/// and forwarding `--model ""` leaves an agent with no resolvable model, so an
+/// empty value has to read as "not set" in every source.
+fn non_empty(s: String) -> Option<String> {
+    let s = s.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+impl ModelSelection {
+    /// The pinned model, else `var` from the environment.
+    pub fn model_or_env(&self, var: &str) -> Option<String> {
+        Self::pick(self.model.clone(), var)
+    }
+
+    /// The pinned provider, else `var` from the environment.
+    pub fn provider_or_env(&self, var: &str) -> Option<String> {
+        Self::pick(self.provider.clone(), var)
+    }
+
+    fn pick(row: Option<String>, var: &str) -> Option<String> {
+        row.and_then(non_empty)
+            .or_else(|| std::env::var(var).ok().and_then(non_empty))
+    }
+}
+
 /// Build a `CommandBuilder` for `claude` (or whatever `WSX_CLAUDE_BIN`
 /// points to) inside `cwd`. Inherits the current process env.
 ///
@@ -207,6 +251,7 @@ pub fn build_pi_command(
     cwd: &Path,
     mode: &SpawnMode,
     _remote: crate::agent::remote_control::RemoteOpts,
+    selection: &ModelSelection,
 ) -> CommandBuilder {
     let bin = std::env::var("WSX_PI_BIN").unwrap_or_else(|_| "pi".to_string());
     let mut cmd = CommandBuilder::new(bin);
@@ -271,14 +316,8 @@ pub fn build_pi_command(
         // `export FOO=$BAR` to "" when $BAR is unset, and we don't want to
         // emit `--model ""` (re-triggers the pi short-circuit) or `--models
         // "/*"` (malformed glob).
-        let model = std::env::var("WSX_PI_MODEL")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let provider = std::env::var("WSX_PI_PROVIDER")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let model = selection.model_or_env("WSX_PI_MODEL");
+        let provider = selection.provider_or_env("WSX_PI_PROVIDER");
         if let Some(model) = model {
             cmd.arg("--model");
             cmd.arg(&model);
@@ -336,6 +375,7 @@ pub fn build_hermes_command(
     cwd: &Path,
     mode: &SpawnMode,
     _remote: crate::agent::remote_control::RemoteOpts,
+    selection: &ModelSelection,
 ) -> CommandBuilder {
     let bin = std::env::var("WSX_HERMES_BIN").unwrap_or_else(|_| "hermes".to_string());
     let mut cmd = CommandBuilder::new(bin);
@@ -369,14 +409,8 @@ pub fn build_hermes_command(
         cmd.arg("--yolo");
     }
 
-    let model = std::env::var("WSX_HERMES_MODEL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let provider = std::env::var("WSX_HERMES_PROVIDER")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let model = selection.model_or_env("WSX_HERMES_MODEL");
+    let provider = selection.provider_or_env("WSX_HERMES_PROVIDER");
     if let Some(m) = &model {
         cmd.env("HERMES_INFERENCE_MODEL", m);
     }
@@ -537,6 +571,7 @@ pub fn build_codex_command(
     cwd: &Path,
     mode: &SpawnMode,
     _remote: crate::agent::remote_control::RemoteOpts,
+    selection: &ModelSelection,
 ) -> CommandBuilder {
     let bin = std::env::var("WSX_CODEX_BIN").unwrap_or_else(|_| "codex".to_string());
     let mut cmd = CommandBuilder::new(bin);
@@ -595,10 +630,7 @@ pub fn build_codex_command(
         cmd.arg("--dangerously-bypass-approvals-and-sandbox");
     }
 
-    let model = std::env::var("WSX_CODEX_MODEL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let model = selection.model_or_env("WSX_CODEX_MODEL");
     if let Some(m) = model {
         cmd.arg("-m");
         cmd.arg(&m);
@@ -641,6 +673,7 @@ pub fn build_omp_command(
     cwd: &Path,
     mode: &SpawnMode,
     _remote: crate::agent::remote_control::RemoteOpts,
+    selection: &ModelSelection,
 ) -> CommandBuilder {
     let bin = std::env::var("WSX_OMP_BIN").unwrap_or_else(|_| "omp".to_string());
     let mut cmd = CommandBuilder::new(bin);
@@ -701,13 +734,7 @@ pub fn build_omp_command(
         // Resume restores the session's stored model and approval config, so
         // re-asserting `--model` here would fight the session's own choice.
         cmd.arg("-c");
-    } else if let Some(model) = std::env::var("WSX_OMP_MODEL")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        // Empty/whitespace reads as unset: a shell expands `export FOO=$UNSET`
-        // to "", and `--model ""` leaves omp with no resolvable model.
+    } else if let Some(model) = selection.model_or_env("WSX_OMP_MODEL") {
         cmd.arg("--model");
         cmd.arg(&model);
     }
@@ -1255,6 +1282,7 @@ mod tests {
                 &cwd,
                 mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             cmd.get_argv()
                 .iter()
@@ -1443,6 +1471,7 @@ mod tests {
                 std::path::Path::new("/tmp/wt"),
                 mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             cmd.get_argv()
                 .iter()
@@ -1466,6 +1495,103 @@ mod tests {
                 doctrine: None,
                 additional_dirs: vec![],
                 yolo,
+            }
+        }
+
+        /// Build an omp command with an explicit selection, so the row's value
+        /// and the ambient environment can be varied independently.
+        fn omp_argv_with(
+            mode: &super::SpawnMode,
+            selection: &crate::pty::ModelSelection,
+        ) -> Vec<String> {
+            let cmd = super::build_omp_command(
+                std::path::Path::new("/tmp/wt"),
+                mode,
+                crate::agent::remote_control::RemoteOpts::disabled(),
+                selection,
+            );
+            cmd.get_argv()
+                .iter()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect()
+        }
+
+        /// The regression this whole change exists for.
+        ///
+        /// Before the model lived on the instance row there was only the
+        /// ambient environment, so a workspace could not carry a model of its
+        /// own: whatever the TUI process was launched with won for every
+        /// workspace at once. Case 2 below is the one that was impossible.
+        ///
+        /// All cases share one test because the environment is process-global
+        /// and `EnvGuard` serializes on `ENV_LOCK` — splitting them would only
+        /// contend on the same lock, matching `build_pi_command_passes_model_selection`.
+        #[test]
+        fn pinned_model_beats_the_ambient_environment() {
+            use crate::pty::ModelSelection;
+            use crate::test_support::EnvGuard;
+            let mode = fresh(false);
+            let model_after = |argv: &[String]| -> Option<String> {
+                argv.iter()
+                    .position(|a| a == "--model")
+                    .and_then(|i| argv.get(i + 1).cloned())
+            };
+
+            // 1. Nothing pinned → the environment still applies, unchanged
+            //    from the behaviour that predates the row.
+            {
+                let mut env = EnvGuard::new();
+                env.set("WSX_OMP_MODEL", "from-env");
+                let argv = omp_argv_with(&mode, &ModelSelection::default());
+                assert_eq!(model_after(&argv).as_deref(), Some("from-env"), "{argv:?}");
+            }
+
+            // 2. Pinned with NO variable exported. This is the case that could
+            //    not happen before: the spawning process need not have ever
+            //    seen the environment the workspace was created in.
+            {
+                let mut env = EnvGuard::new();
+                env.remove("WSX_OMP_MODEL");
+                let selection = ModelSelection {
+                    model: Some("from-row".into()),
+                    provider: None,
+                };
+                let argv = omp_argv_with(&mode, &selection);
+                assert_eq!(model_after(&argv).as_deref(), Some("from-row"), "{argv:?}");
+            }
+
+            // 3. Both set → the row wins. A process-wide variable must not
+            //    override a choice made per workspace.
+            {
+                let mut env = EnvGuard::new();
+                env.set("WSX_OMP_MODEL", "from-env");
+                let selection = ModelSelection {
+                    model: Some("from-row".into()),
+                    provider: None,
+                };
+                let argv = omp_argv_with(&mode, &selection);
+                assert_eq!(model_after(&argv).as_deref(), Some("from-row"), "{argv:?}");
+            }
+
+            // 4. A blank pin reads as unset and defers to the environment,
+            //    rather than forwarding `--model ""`.
+            {
+                let mut env = EnvGuard::new();
+                env.set("WSX_OMP_MODEL", "from-env");
+                let selection = ModelSelection {
+                    model: Some("   ".into()),
+                    provider: None,
+                };
+                let argv = omp_argv_with(&mode, &selection);
+                assert_eq!(model_after(&argv).as_deref(), Some("from-env"), "{argv:?}");
+            }
+
+            // 5. Neither → no flag at all, so omp uses its own config.
+            {
+                let mut env = EnvGuard::new();
+                env.remove("WSX_OMP_MODEL");
+                let argv = omp_argv_with(&mode, &ModelSelection::default());
+                assert!(!argv.iter().any(|a| a == "--model"), "{argv:?}");
             }
         }
 
@@ -1692,6 +1818,7 @@ mod tests {
                 tmp.path(),
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             assert_eq!(
@@ -1712,6 +1839,7 @@ mod tests {
                 tmp.path(),
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             assert!(!argv.iter().any(|a| a == "--continue"), "argv: {argv:?}");
@@ -1733,6 +1861,7 @@ mod tests {
                 tmp.path(),
                 &mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             assert!(argv_strings(&cmd).iter().any(|a| a == "--yolo"));
         }
@@ -1750,6 +1879,7 @@ mod tests {
                 tmp.path(),
                 &mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             assert!(argv_strings(&cmd).iter().any(|a| a == "--yolo"));
         }
@@ -1770,6 +1900,7 @@ mod tests {
                     tmp.path(),
                     mode,
                     crate::agent::remote_control::RemoteOpts::disabled(),
+                    &crate::pty::ModelSelection::default(),
                 );
                 let argv = argv_strings(&cmd);
                 assert!(
@@ -1788,6 +1919,7 @@ mod tests {
                 bogus,
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             assert!(
@@ -1813,6 +1945,7 @@ mod tests {
                 cwd.path(),
                 &mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             assert!(!argv.iter().any(|a| a == "--resume"), "argv: {argv:?}");
@@ -1853,6 +1986,7 @@ mod tests {
                 cwd.path(),
                 &mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             let idx = argv
@@ -1907,6 +2041,7 @@ mod tests {
                 cwd.path(),
                 &mode,
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             let idx = argv
@@ -1936,6 +2071,7 @@ mod tests {
                 tmp.path(),
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             assert_eq!(
                 env_of(&cmd, "HERMES_INFERENCE_MODEL"),
@@ -1955,6 +2091,7 @@ mod tests {
                 tmp.path(),
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             let argv = argv_strings(&cmd);
             let idx = argv
@@ -1975,6 +2112,7 @@ mod tests {
                 tmp.path(),
                 &fresh_no_rename(),
                 crate::agent::remote_control::RemoteOpts::disabled(),
+                &crate::pty::ModelSelection::default(),
             );
             assert!(env_of(&cmd, "HERMES_INFERENCE_MODEL").is_none());
             let argv = argv_strings(&cmd);
@@ -2079,6 +2217,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv
@@ -2104,6 +2243,7 @@ mod tests {
             Path::new("/tmp/wt"),
             mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         cmd.get_argv()
             .iter()

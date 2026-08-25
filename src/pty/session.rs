@@ -715,19 +715,20 @@ pub fn spawn_session(
     agent: AgentKind,
     identity: Option<SpawnIdentity>,
     tmux: Option<&str>,
+    selection: &crate::pty::ModelSelection,
 ) -> Result<Session> {
     let mut child_cmd = match agent {
         AgentKind::Claude => build_claude_command(cwd, &mode, remote),
-        AgentKind::Pi => build_pi_command(cwd, &mode, remote),
+        AgentKind::Pi => build_pi_command(cwd, &mode, remote, selection),
         AgentKind::Hermes => {
             prepare_hermes_workspace(cwd, &mode);
-            build_hermes_command(cwd, &mode, remote)
+            build_hermes_command(cwd, &mode, remote, selection)
         }
         AgentKind::Codex => {
             prepare_codex_workspace(cwd, &mode);
-            build_codex_command(cwd, &mode, remote)
+            build_codex_command(cwd, &mode, remote, selection)
         }
-        AgentKind::Omp => build_omp_command(cwd, &mode, remote),
+        AgentKind::Omp => build_omp_command(cwd, &mode, remote, selection),
     };
     if let Some(id) = identity {
         child_cmd.env("WSX_WORKSPACE_ID", id.workspace_id.to_string());
@@ -916,6 +917,7 @@ impl SessionManager {
         remote: crate::agent::remote_control::RemoteOpts,
         agent: AgentKind,
         tmux: Option<&str>,
+        selection: &crate::pty::ModelSelection,
     ) -> Result<Arc<Session>> {
         if let Some(s) = self.sessions.get(&id) {
             if matches!(*s.status.read().unwrap(), SessionStatus::Running { .. }) {
@@ -928,7 +930,7 @@ impl SessionManager {
             instance_id: id.0,
         });
         let session = Arc::new(spawn_session(
-            cwd, cols, rows, mode, remote, agent, identity, tmux,
+            cwd, cols, rows, mode, remote, agent, identity, tmux, selection,
         )?);
         self.sessions.insert(id, session.clone());
         Ok(session)
@@ -1092,6 +1094,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         s.writer
@@ -1199,6 +1202,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         s.resize(80, 0).unwrap();
@@ -1230,6 +1234,7 @@ mod tests {
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 AgentKind::Codex,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
         let visible_session = sm
@@ -1243,6 +1248,7 @@ mod tests {
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 AgentKind::Codex,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
 
@@ -1320,6 +1326,7 @@ mod tests {
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 AgentKind::Codex,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
         // cat reads stdin forever — the spawn stays alive so we can verify
@@ -1365,6 +1372,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 
@@ -1613,6 +1621,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         // Prime cat with some output so activity_ms is populated, then let it
@@ -1670,6 +1679,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         // Everything except the floor says "go": a composer row on screen and
@@ -1721,6 +1731,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         // Do NOT send any input — cat stays silent, activity_ms never gets set.
@@ -1763,6 +1774,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .expect("spawn_session for scrollback test")
     }
@@ -1960,6 +1972,7 @@ mod tests {
             AgentKind::Claude,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         );
         let err = match result {
             Err(e) => e,
@@ -2194,6 +2207,7 @@ mod tests {
             AgentKind::Codex,
             None,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         s.writer
@@ -2249,6 +2263,7 @@ mod tests {
             AgentKind::Claude,
             None,
             Some(name),
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         // Server-side session appears (client connect is async; poll briefly).
@@ -2334,6 +2349,7 @@ mod tests {
             AgentKind::Claude,
             None,
             Some(name),
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
         let mut alive = false;
@@ -2366,6 +2382,7 @@ mod tests {
             AgentKind::Claude,
             None,
             Some(name),
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 

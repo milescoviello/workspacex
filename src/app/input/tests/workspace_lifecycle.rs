@@ -581,6 +581,7 @@ async fn capital_t_opens_confirm_share_and_y_flips_shared_and_restarts_session()
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     app.refresh().unwrap();

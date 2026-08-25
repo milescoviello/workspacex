@@ -71,6 +71,7 @@ fn setup_two_workspaces_with_sessions(
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 crate::pty::session::AgentKind::Claude,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
     }
