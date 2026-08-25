@@ -237,14 +237,7 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                 let running_endpoint = primary
                     .as_ref()
                     .and_then(|i| app.instance_running_endpoint(i));
-                // Only worth showing when it differs from what is already
-                // running; otherwise it is the same fact stated twice.
-                let model_pending = primary.as_ref().and_then(|i| {
-                    let pinned = i.model_profile.as_deref()?;
-                    let pinned_endpoint = app.instance_pinned_endpoint(i);
-                    let same = pinned_endpoint.map(str::to_string) == running_endpoint;
-                    (!same).then(|| pinned.to_string())
-                });
+                let model_pending = primary.as_ref().and_then(|i| app.pending_model(i));
                 let endpoint_peers = running_endpoint
                     .as_deref()
                     .map(|endpoint| app.endpoint_peer_count(endpoint, ws.id))

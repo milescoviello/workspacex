@@ -273,6 +273,42 @@ impl App {
             .and_then(|p| p.base_url.as_deref())
     }
 
+    /// What an instance would spawn on next, when that differs from what it is
+    /// running now — otherwise `None`, because saying it twice is noise.
+    ///
+    /// "Differs" has to cover the model as well as the endpoint: a profile that
+    /// sets a model and no `base_url` is the most ordinary profile there is, and
+    /// comparing endpoints alone hid every change one of those made. Reverting
+    /// to the agent's own default counts too — it is the change with no name of
+    /// its own, and without it clearing a pin looked exactly like doing nothing.
+    ///
+    /// Resolved the way `spawn_session` resolves it, environment fallback and
+    /// endpoint capability included, so this compares against what would
+    /// actually happen rather than an approximation of it.
+    pub fn pending_model(&self, inst: &crate::data::agents::AgentInstance) -> Option<String> {
+        let next = crate::commands::model_profiles::selection_for(&self.store, inst).ok()?;
+        let next_model = inst
+            .agent
+            .model_env()
+            .and_then(|var| next.model_or_env(var));
+        let next_endpoint = inst
+            .agent
+            .supports_endpoint()
+            .then(|| next.base_url.clone())
+            .flatten();
+        let running_model = self.instance_running_model(inst);
+        let running_endpoint = self.instance_running_endpoint(inst);
+        if next_model == running_model && next_endpoint == running_endpoint {
+            return None;
+        }
+        Some(
+            inst.model_profile
+                .clone()
+                .or(next_model)
+                .unwrap_or_else(|| "(agent default)".to_string()),
+        )
+    }
+
     /// How many *other* workspaces currently have a running agent pointed at
     /// `endpoint`.
     ///
@@ -875,6 +911,95 @@ mod strip_instances_tests {
         ) {
             self.sessions.insert_fake_session(id, status);
         }
+    }
+
+    /// A pending change is any difference between what an agent is running and
+    /// what it would start on — model included, not just endpoint.
+    ///
+    /// The endpoint-only comparison this replaces hid every change made by a
+    /// profile that sets a model and no `base_url`, which is the most ordinary
+    /// profile there is: the panel showed the old model with no hint it was
+    /// about to change.
+    #[test]
+    fn pending_model_notices_a_model_change_with_no_endpoint_change() {
+        let mut app = test_app();
+        app.store
+            .set_setting("model_profiles", "cheap model=haiku")
+            .unwrap();
+        let ws = app.test_workspace("pend");
+        let inst = app
+            .store
+            .add_primary_agent(ws, AgentKind::Claude, 1)
+            .unwrap()
+            .id;
+        // Running on the agent's own default: no model, no endpoint.
+        app.sessions.insert_fake_session_spawned_on(
+            inst,
+            SessionStatus::Running { pid: 1 },
+            None,
+            None,
+        );
+        app.refresh().unwrap();
+        let row = |app: &App| app.store.workspace_agents_by_id(inst).unwrap().unwrap();
+
+        assert_eq!(
+            app.pending_model(&row(&app)),
+            None,
+            "nothing pinned, nothing pending"
+        );
+
+        app.store
+            .set_instance_model_profile(inst, Some("cheap"))
+            .unwrap();
+        app.refresh().unwrap();
+        assert_eq!(
+            app.pending_model(&row(&app)).as_deref(),
+            Some("cheap"),
+            "a model-only profile still changes the next spawn"
+        );
+    }
+
+    /// Reverting to the agent's own default is a change with no name of its
+    /// own. Without reporting it, clearing a pin on a running agent looked
+    /// exactly like doing nothing.
+    #[test]
+    fn pending_model_reports_a_revert_to_the_agent_default() {
+        let mut app = test_app();
+        app.store
+            .set_setting("model_profiles", "cheap model=haiku")
+            .unwrap();
+        let ws = app.test_workspace("revert");
+        let inst = app
+            .store
+            .add_primary_agent(ws, AgentKind::Claude, 1)
+            .unwrap()
+            .id;
+        // Running on haiku, as if it had spawned under the pin.
+        app.sessions.insert_fake_session_spawned_on(
+            inst,
+            SessionStatus::Running { pid: 1 },
+            Some("haiku"),
+            None,
+        );
+        app.store
+            .set_instance_model_profile(inst, Some("cheap"))
+            .unwrap();
+        app.refresh().unwrap();
+        let row = |app: &App| app.store.workspace_agents_by_id(inst).unwrap().unwrap();
+
+        assert_eq!(
+            app.pending_model(&row(&app)),
+            None,
+            "the pin matches what is running, so nothing is pending"
+        );
+
+        app.store.set_instance_model_profile(inst, None).unwrap();
+        app.refresh().unwrap();
+        assert_eq!(
+            app.pending_model(&row(&app)).as_deref(),
+            Some("(agent default)"),
+            "clearing a pin is a queued change and must say so"
+        );
     }
 
     /// Contention is about what agents are **actually running on**, not what
