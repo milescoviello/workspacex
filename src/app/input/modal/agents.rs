@@ -135,6 +135,43 @@ pub(super) async fn agents_panel(
             // `refresh()`.
             app.refresh()?;
         }
+        KeyCode::Char('p') => {
+            // Cycle the primary instance through the configured profiles and
+            // back off again: none -> first -> ... -> last -> none.
+            //
+            // A cycle rather than a picker modal because the set is small and
+            // user-defined, and the codebase already resolves bounded choices
+            // this way (`o` cycles sort order, `G` cycles grouping). A picker
+            // would be a second modal on top of a modal for a list that is
+            // usually two entries long.
+            let profiles = crate::commands::model_profiles::list(&app.store)?;
+            if !profiles.is_empty() {
+                if let Some(primary) = app
+                    .store
+                    .workspace_agents(workspace_id)?
+                    .into_iter()
+                    .find(|i| i.is_primary)
+                {
+                    let next = match primary.model_profile.as_deref() {
+                        None => Some(profiles[0].name.clone()),
+                        Some(current) => match profiles.iter().position(|p| p.name == current) {
+                            // Past the end wraps to "no pin", so the cycle can
+                            // always get back to the agent's own default.
+                            Some(i) => profiles.get(i + 1).map(|p| p.name.clone()),
+                            // Pinned to something that no longer exists: start
+                            // the cycle over rather than stranding it.
+                            None => Some(profiles[0].name.clone()),
+                        },
+                    };
+                    app.store
+                        .set_instance_model_profile(primary.id, next.as_deref())?;
+                    // Refill `agent_roster` so the panel and the detail bar
+                    // both reflect the change — nothing else on this path goes
+                    // through `refresh()`.
+                    app.refresh()?;
+                }
+            }
+        }
         KeyCode::Char('x') => {
             // Remove the most-recently-added non-primary instance.
             if let Some(last) = app

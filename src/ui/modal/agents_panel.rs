@@ -19,10 +19,16 @@ pub fn render_agents_panel(
     lines.push(Line::from("Attached:"));
     for a in agents {
         let tag = if a.is_primary { "  (primary)" } else { "" };
-        lines.push(Line::from(vec![
+        let mut spans = vec![
             Span::styled("▎", theme.agent_style(a.agent)),
             Span::raw(format!(" {}{}", a.label(), tag)),
-        ]));
+        ];
+        // Profile first, then the model recorded at creation: the profile is
+        // what someone chose, the model is what happened to be exported.
+        if let Some(model) = a.model_profile.as_deref().or(a.model.as_deref()) {
+            spans.push(Span::styled(format!("  [{model}]"), theme.dim_style()));
+        }
+        lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
     lines.push(Line::from("Add:"));
@@ -41,7 +47,7 @@ pub fn render_agents_panel(
     lines.push(Line::from(add));
     lines.push(Line::from(""));
     lines.push(Line::from(
-        "Enter add   a add all   x remove   \u{2191}\u{2193} move   Esc close",
+        "Enter add   a add all   x remove   p model   \u{2191}\u{2193} move   Esc close",
     ));
 
     f.render_widget(Paragraph::new(lines), inner);

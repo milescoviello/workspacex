@@ -47,7 +47,7 @@ Keystrokes are forwarded to the running `claude` session, except:
 | `Ctrl-x Esc`     | Dismiss the navigation overlay without detaching (stay in the attached view).                               |
 | `Ctrl-x ←/→/↑/↓` | Move focus between split panes in that direction (vim's `Ctrl-w` motions).                                  |
 | `Ctrl-x u`       | Open the floating updates panel (shows other workspaces' state; `v`/`s` open in a split, `o` cycles the sort, `/` filters the list) |
-| `Ctrl-x a`       | Open the agents panel to add/remove agents in this workspace (see [Multi-agent workspaces](../configuration/multi-agent-workspaces.md)) |
+| `Ctrl-x a`       | Open the agents panel to add/remove agents and set the model in this workspace (see [Multi-agent workspaces](../configuration/multi-agent-workspaces.md)) |
 | `Ctrl-x e`       | Open the attached workspace in your editor (same `editor_cmd` as `[e]` on the dashboard)                    |
 | `Ctrl-x t`       | Open the attached workspace in a terminal (same `terminal_cmd` as `[t]`)                                    |
 | `Ctrl-x v`       | View diff of the attached workspace's branch vs the base branch (same `diff_cmd` as `[v]`)                  |

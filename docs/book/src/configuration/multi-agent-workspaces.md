@@ -12,9 +12,18 @@ In the TUI, press `Ctrl-x a` while a workspace is selected to open the **agents 
 | `Enter`  | Add the highlighted kind                                |
 | `a`      | Add one of every kind at once                           |
 | `x`      | Remove the most-recently-added (non-primary) agent      |
+| `p`      | Cycle the primary agent's [model profile](model-profiles.md) |
 | `Esc`    | Close the panel                                         |
 
 Newly added agents spawn immediately with the workspace's context injected. The primary can't be removed from the panel — it lives for the life of the workspace.
+
+Each attached agent shows what it will spawn on in `[brackets]`: the model
+profile it is pinned to, else the model recorded when the workspace was created.
+`p` walks the primary through the configured profiles and then back off the end,
+so the agent's own default is always reachable without leaving the panel. It is
+a cycle rather than a picker because the profile list is short and user-defined,
+and a second modal on top of a modal earns nothing for a list that is usually
+two entries long. `wsx agent profile <name|--clear>` is the CLI equivalent.
 
 From the CLI, the equivalent of the panel's "add" is:
 
