@@ -34,6 +34,16 @@ use std::path::Path;
 pub struct ModelSelection {
     pub model: Option<String>,
     pub provider: Option<String>,
+    /// API endpoint to point the agent at, from a named profile. This is what
+    /// makes a local server usable: llama.cpp, ollama and vLLM differ from a
+    /// hosted API only by this URL.
+    pub base_url: Option<String>,
+    /// Name of an environment variable holding the endpoint's token. The token
+    /// itself is never stored, only read at spawn time from this variable.
+    pub auth_token_env: Option<String>,
+    /// Context limit to advertise to the agent, for endpoints whose window
+    /// differs from the model's default.
+    pub max_context: Option<u64>,
 }
 
 /// Trim and treat blank as absent. A shell expands `export FOO=$UNSET` to "",
@@ -74,6 +84,7 @@ pub fn build_claude_command(
     cwd: &Path,
     mode: &SpawnMode,
     remote: crate::agent::remote_control::RemoteOpts,
+    selection: &ModelSelection,
 ) -> CommandBuilder {
     let bin = std::env::var("WSX_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string());
     let mut cmd = CommandBuilder::new(bin);
@@ -146,6 +157,42 @@ pub fn build_claude_command(
     for dir in &add_dirs {
         cmd.arg("--add-dir");
         cmd.arg(dir);
+    }
+
+    // Endpoint, from a named profile. Applied after the inherited environment
+    // above so a profile beats whatever the TUI itself was launched with —
+    // otherwise a shell that exports ANTHROPIC_BASE_URL for its own reasons
+    // would silently redirect every profile-pinned workspace.
+    //
+    // These are set on every spawn, resume included: the variables live in the
+    // process, not in the transcript, so a resumed session that did not get
+    // them would quietly fail over to the default endpoint.
+    if let Some(base_url) = &selection.base_url {
+        cmd.env("ANTHROPIC_BASE_URL", base_url);
+    }
+    if let Some(var) = &selection.auth_token_env {
+        // Absent is not an error: an endpoint on localhost usually wants no
+        // token at all, and failing the spawn over a missing one would make
+        // the common local case the awkward one.
+        match std::env::var(var) {
+            Ok(token) if !token.trim().is_empty() => {
+                cmd.env("ANTHROPIC_AUTH_TOKEN", token);
+            }
+            _ => tracing::debug!(
+                var = var.as_str(),
+                "auth_token_env names an unset or empty variable; spawning without a token"
+            ),
+        }
+    }
+    if let Some(max_context) = selection.max_context {
+        cmd.env("CLAUDE_CODE_MAX_CONTEXT_TOKENS", max_context.to_string());
+    }
+    if let Some(model) = selection.model_or_env("WSX_CLAUDE_MODEL") {
+        // Re-asserted on resume too, unlike omp's `-c`: the pin belongs to the
+        // workspace, so a resumed session should continue on the model the
+        // workspace is pinned to rather than on whatever it started with.
+        cmd.arg("--model");
+        cmd.arg(&model);
     }
 
     if add_continue {
@@ -782,6 +829,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv
@@ -851,6 +899,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(argv.iter().any(|a| a == std::ffi::OsStr::new("--continue")));
@@ -886,6 +935,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv
@@ -916,6 +966,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(
@@ -940,6 +991,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(
@@ -962,6 +1014,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(argv.iter().any(|a| a == std::ffi::OsStr::new("--continue")));
@@ -986,6 +1039,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(
@@ -1057,6 +1111,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv
@@ -1097,6 +1152,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv
@@ -1138,7 +1194,7 @@ mod tests {
             enabled: true,
             sandbox: false,
         };
-        let cmd = build_claude_command(&cwd, &mode, opts);
+        let cmd = build_claude_command(&cwd, &mode, opts, &crate::pty::ModelSelection::default());
         let argv = cmd.get_argv();
         assert!(
             argv.iter()
@@ -1165,7 +1221,7 @@ mod tests {
             enabled: true,
             sandbox: true,
         };
-        let cmd = build_claude_command(&cwd, &mode, opts);
+        let cmd = build_claude_command(&cwd, &mode, opts, &crate::pty::ModelSelection::default());
         let argv = cmd.get_argv();
         assert!(
             argv.iter()
@@ -1188,6 +1244,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         assert!(
@@ -1216,6 +1273,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let args: Vec<String> = cmd
             .get_argv()
@@ -1252,6 +1310,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let args: Vec<String> = cmd
             .get_argv()
@@ -1259,6 +1318,117 @@ mod tests {
             .map(|s| s.to_string_lossy().to_string())
             .collect();
         assert!(!args.iter().any(|a| a == "--add-dir"), "got: {args:?}");
+    }
+
+    /// Pointing an agent at a local model server is the whole reason profiles
+    /// exist, and for Claude Code it is four separate things — endpoint, token,
+    /// context window and model name — none of which existed here before.
+    ///
+    /// One test for all of it: the builder reads process-global environment, so
+    /// separate `#[test]` fns would only contend on `ENV_LOCK`.
+    #[test]
+    fn build_claude_command_applies_a_profile_endpoint() {
+        use crate::pty::ModelSelection;
+        let cwd = PathBuf::from(".");
+        let mode = SpawnMode::Fresh {
+            rename_ctx: None,
+            custom_instructions: None,
+            doctrine: None,
+            additional_dirs: vec![],
+            yolo: false,
+        };
+        let build = |selection: &ModelSelection| {
+            build_claude_command(
+                &cwd,
+                &mode,
+                crate::agent::remote_control::RemoteOpts::disabled(),
+                selection,
+            )
+        };
+        let argv_of = |cmd: &CommandBuilder| -> Vec<String> {
+            cmd.get_argv()
+                .iter()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect()
+        };
+
+        // A fully-specified profile reaches the child as environment plus a flag.
+        {
+            let mut env = EnvGuard::new();
+            env.set("WSX_TEST_LOCAL_TOKEN", "shhh");
+            env.remove("WSX_CLAUDE_MODEL");
+            let cmd = build(&ModelSelection {
+                model: Some("qwen3.8-27b".into()),
+                base_url: Some("http://127.0.0.1:8091".into()),
+                auth_token_env: Some("WSX_TEST_LOCAL_TOKEN".into()),
+                max_context: Some(212_992),
+                ..Default::default()
+            });
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_BASE_URL").and_then(|v| v.to_str()),
+                Some("http://127.0.0.1:8091")
+            );
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.to_str()),
+                Some("shhh"),
+                "the token is read from the named variable, never stored"
+            );
+            assert_eq!(
+                cmd.get_env("CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+                    .and_then(|v| v.to_str()),
+                Some("212992")
+            );
+            let argv = argv_of(&cmd);
+            let i = argv.iter().position(|a| a == "--model");
+            assert_eq!(
+                i.and_then(|i| argv.get(i + 1)).map(String::as_str),
+                Some("qwen3.8-27b"),
+                "argv: {argv:?}"
+            );
+        }
+
+        // A local endpoint usually needs no token at all, so a variable that is
+        // unset must not fail the spawn or invent an empty credential.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_TEST_ABSENT_TOKEN");
+            env.remove("ANTHROPIC_AUTH_TOKEN");
+            let cmd = build(&ModelSelection {
+                base_url: Some("http://127.0.0.1:8091".into()),
+                auth_token_env: Some("WSX_TEST_ABSENT_TOKEN".into()),
+                ..Default::default()
+            });
+            assert_eq!(cmd.get_env("ANTHROPIC_AUTH_TOKEN"), None);
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_BASE_URL").and_then(|v| v.to_str()),
+                Some("http://127.0.0.1:8091"),
+                "a missing token must not cost the endpoint"
+            );
+        }
+
+        // claude was the only agent of the five with no model variable at all.
+        {
+            let mut env = EnvGuard::new();
+            env.set("WSX_CLAUDE_MODEL", "from-env");
+            let argv = argv_of(&build(&ModelSelection::default()));
+            let i = argv.iter().position(|a| a == "--model");
+            assert_eq!(
+                i.and_then(|i| argv.get(i + 1)).map(String::as_str),
+                Some("from-env"),
+                "argv: {argv:?}"
+            );
+        }
+
+        // Nothing selected and nothing exported → no flag, no endpoint, so the
+        // default Anthropic behaviour is untouched.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CLAUDE_MODEL");
+            env.remove("ANTHROPIC_BASE_URL");
+            let cmd = build(&ModelSelection::default());
+            assert!(!argv_of(&cmd).iter().any(|a| a == "--model"));
+            assert_eq!(cmd.get_env("ANTHROPIC_BASE_URL"), None);
+        }
     }
 
     // All branches in one test: env vars are process-global and the function
@@ -1554,7 +1724,7 @@ mod tests {
                 env.remove("WSX_OMP_MODEL");
                 let selection = ModelSelection {
                     model: Some("from-row".into()),
-                    provider: None,
+                    ..Default::default()
                 };
                 let argv = omp_argv_with(&mode, &selection);
                 assert_eq!(model_after(&argv).as_deref(), Some("from-row"), "{argv:?}");
@@ -1567,7 +1737,7 @@ mod tests {
                 env.set("WSX_OMP_MODEL", "from-env");
                 let selection = ModelSelection {
                     model: Some("from-row".into()),
-                    provider: None,
+                    ..Default::default()
                 };
                 let argv = omp_argv_with(&mode, &selection);
                 assert_eq!(model_after(&argv).as_deref(), Some("from-row"), "{argv:?}");
@@ -1580,7 +1750,7 @@ mod tests {
                 env.set("WSX_OMP_MODEL", "from-env");
                 let selection = ModelSelection {
                     model: Some("   ".into()),
-                    provider: None,
+                    ..Default::default()
                 };
                 let argv = omp_argv_with(&mode, &selection);
                 assert_eq!(model_after(&argv).as_deref(), Some("from-env"), "{argv:?}");
@@ -2185,6 +2355,7 @@ mod tests {
             &cwd,
             &mode,
             crate::agent::remote_control::RemoteOpts::disabled(),
+            &crate::pty::ModelSelection::default(),
         );
         let argv = cmd.get_argv();
         let idx = argv

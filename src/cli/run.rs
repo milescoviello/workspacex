@@ -323,6 +323,12 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                     detail_bar_config_validate_and_normalize(&value)?
                 } else if key == "usage_graph_window" {
                     usage_window_validate_and_normalize(&value)?
+                } else if key == "model_profiles" {
+                    // Strict here and tolerant on read: this is the one moment
+                    // a malformed line can still be reported to the person who
+                    // typed it, and the one place a literal credential can be
+                    // refused before it reaches the database.
+                    crate::commands::model_profiles::validate(&value)?
                 } else {
                     value
                 };

@@ -22,6 +22,7 @@
   - [Auto-rename modes](configuration/auto-rename-modes.md)
   - [Change chronology](configuration/change-chronology.md)
   - [Coding agents](configuration/coding-agents.md)
+  - [Model profiles](configuration/model-profiles.md)
   - [Multi-agent workspaces](configuration/multi-agent-workspaces.md)
   - [Per-repo setup scripts](configuration/per-repo-setup-scripts.md)
 - [Integrations and remote access](integrations/index.md)

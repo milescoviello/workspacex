@@ -23,6 +23,9 @@ pub struct AgentInstance {
     pub model: Option<String>,
     /// Provider counterpart to `model`, same fallback rule.
     pub provider: Option<String>,
+    /// Name of a `model_profiles` entry this instance is pinned to, which
+    /// takes precedence over `model`/`provider`. See migration 24.
+    pub model_profile: Option<String>,
 }
 
 /// The single source of truth for an instance's display/address name.
@@ -56,6 +59,7 @@ fn row_to_instance(r: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         created_at: r.get(6)?,
         model: r.get(7)?,
         provider: r.get(8)?,
+        model_profile: r.get(9)?,
     })
 }
 
@@ -63,7 +67,7 @@ impl Store {
     /// All instances for a workspace, primary first then by creation time.
     pub fn workspace_agents(&self, ws: WorkspaceId) -> Result<Vec<AgentInstance>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider, model_profile
              FROM workspace_agents WHERE workspace_id = ?1
              ORDER BY is_primary DESC, created_at ASC, id ASC",
         )?;
@@ -80,7 +84,7 @@ impl Store {
         &self,
     ) -> Result<std::collections::HashMap<WorkspaceId, Vec<AgentInstance>>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider, model_profile
              FROM workspace_agents
              ORDER BY workspace_id ASC, is_primary DESC, created_at ASC, id ASC",
         )?;
@@ -122,6 +126,7 @@ impl Store {
             created_at: now,
             model: None,
             provider: None,
+            model_profile: None,
         })
     }
 
@@ -147,6 +152,7 @@ impl Store {
             created_at,
             model: None,
             provider: None,
+            model_profile: None,
         })
     }
 
@@ -203,6 +209,27 @@ impl Store {
         let n = self.conn().execute(
             "UPDATE workspace_agents SET model = ?1, provider = ?2 WHERE id = ?3",
             rusqlite::params![model, provider, id.0],
+        )?;
+        if n == 0 {
+            return Err(crate::error::Error::UserInput("agent not found".into()));
+        }
+        Ok(())
+    }
+
+    /// Pin an instance to a named `model_profiles` entry, or clear it.
+    ///
+    /// The name is stored unresolved on purpose: the profile it points at can
+    /// be edited afterwards and every instance pinned to it picks the change
+    /// up on its next spawn.
+    pub fn set_instance_model_profile(
+        &self,
+        id: AgentInstanceId,
+        profile: Option<&str>,
+    ) -> Result<()> {
+        let profile = profile.map(str::trim).filter(|v| !v.is_empty());
+        let n = self.conn().execute(
+            "UPDATE workspace_agents SET model_profile = ?1 WHERE id = ?2",
+            rusqlite::params![profile, id.0],
         )?;
         if n == 0 {
             return Err(crate::error::Error::UserInput("agent not found".into()));
@@ -273,7 +300,7 @@ impl Store {
     /// A single instance by its id.
     pub fn workspace_agents_by_id(&self, id: AgentInstanceId) -> Result<Option<AgentInstance>> {
         let mut stmt = self.conn().prepare_cached(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider, model_profile
              FROM workspace_agents WHERE id = ?1",
         )?;
         let r = stmt.query_row([id.0], row_to_instance).optional()?;
