@@ -322,3 +322,80 @@ async fn agent_picker_enter_persists_and_retries_attach() {
     // Modal closed.
     assert!(app.modal.is_none(), "modal should be cleared on success");
 }
+
+/// `p` in the agents panel walks the primary agent through the configured
+/// profiles and back off the end, so the agent's own default is always
+/// reachable without leaving the panel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agents_panel_p_cycles_the_model_profile_and_wraps_to_none() {
+    use crate::data::store::{NewWorkspace, WorkspaceId};
+    use crate::pty::session::AgentKind;
+    use crate::ui::modal::Modal;
+
+    let store = Store::open_in_memory().unwrap();
+    let repo = store
+        .add_repo(std::path::Path::new("/tmp/r"), "r", "wsx")
+        .unwrap();
+    let ws: WorkspaceId = store
+        .insert_workspace(&NewWorkspace {
+            repo_id: repo,
+            name: "w",
+            branch: "wsx/w",
+            worktree_path: std::path::Path::new("/tmp/r/w"),
+            yolo: false,
+            agent: AgentKind::Claude,
+            shared: false,
+        })
+        .unwrap();
+    store.add_primary_agent(ws, AgentKind::Claude, 1).unwrap();
+    store
+        .set_setting(
+            "model_profiles",
+            "alpha base_url=http://a\nbeta base_url=http://b",
+        )
+        .unwrap();
+
+    let mut app = App::new(store, PathBuf::from("/tmp/wsx-test")).unwrap();
+    app.refresh().unwrap();
+    app.modal = Some(Modal::AgentsPanel {
+        workspace_id: ws,
+        selected: 0,
+    });
+    let shared = Arc::new(Mutex::new(
+        App::new(
+            Store::open_in_memory().unwrap(),
+            PathBuf::from("/tmp/wsx-test"),
+        )
+        .unwrap(),
+    ));
+
+    let pinned = |app: &App| -> Option<String> {
+        let id = app.store.primary_instance_id(ws).unwrap().unwrap();
+        app.store
+            .workspace_agents_by_id(id)
+            .unwrap()
+            .unwrap()
+            .model_profile
+    };
+    let press_p = async |app: &mut App| {
+        handle_key_modal(
+            app,
+            &shared,
+            KeyEvent::new(crossterm::event::KeyCode::Char('p'), KeyModifiers::NONE),
+        )
+        .await
+        .unwrap();
+    };
+
+    assert_eq!(pinned(&app), None, "starts unpinned");
+    press_p(&mut app).await;
+    assert_eq!(pinned(&app).as_deref(), Some("alpha"));
+    press_p(&mut app).await;
+    assert_eq!(pinned(&app).as_deref(), Some("beta"));
+    press_p(&mut app).await;
+    assert_eq!(
+        pinned(&app),
+        None,
+        "past the last profile must return to the agent default"
+    );
+}
