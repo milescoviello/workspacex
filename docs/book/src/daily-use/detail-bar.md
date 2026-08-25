@@ -1,8 +1,8 @@
 When a workspace is selected on the dashboard, wsx renders a multi-column
 detail bar across the bottom. The body is divided into 1–4 equal-width
 **containers**; each container holds one or more **modules** stacked
-vertically. Four built-in modules ship today: `session_summary`,
-`recent_chat`, `processes`, `recent_files`. The bar's appearance is
+vertically. Five built-in modules ship today: `session_summary`,
+`recent_chat`, `processes`, `recent_files`, `model`. The bar's appearance is
 controlled by the `detail_bar_config` setting — globally via `wsx config`,
 with optional per-repo overrides.
 
@@ -37,8 +37,15 @@ clamped on save (see below).
 | `containers`      | list of lists | (see default above) | Outer length 1–4: one entry per equal-width column. Inner is a list of module IDs stacked vertically within the column. An empty inner list `[]` reserves an empty column. Empty outer list resets to default. Lengths > 4 are truncated to 4. |
 
 **Built-in module IDs:** `session_summary`, `recent_chat`, `processes`,
-`recent_files`. Unknown IDs render a `[unknown: <id>]` placeholder and
+`recent_files`, `model`. Unknown IDs render a `[unknown: <id>]` placeholder and
 log a warning, so typos are visible but don't break the dashboard.
+
+`model` shows what the workspace's primary agent will spawn on: the
+[model profile](../configuration/model-profiles.md) it is pinned to, else the
+model recorded when it was created, else `(agent default)`. It has a slot of its
+own because the answer is otherwise invisible — the dashboard's agent column is
+a colour strip with room for one bar per agent and no text, so a workspace
+pointed at a local endpoint looks exactly like one on the default.
 
 `session_summary` leads with the workspace's recap — the same
 `goal` / `state` / `next` the Project Manager pane shows, one labeled

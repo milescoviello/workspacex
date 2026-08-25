@@ -33,6 +33,11 @@ pub struct DetailContext<'a> {
     pub status: Status,
     pub ago_secs: Option<u64>,
     pub events_scanned: bool,
+    /// Presentation-ready model label for the workspace's primary agent: the
+    /// pinned profile name, else the model recorded at creation, else `None`
+    /// for "whatever the environment says". Resolved by the caller from the
+    /// already-cached agent roster, so no module performs a query.
+    pub model_label: Option<&'a str>,
     pub theme: &'a Theme,
 }
 
@@ -90,18 +95,20 @@ impl Default for Registry {
 }
 
 pub mod markdown;
+pub mod model;
 pub mod processes;
 pub mod recent_chat;
 pub mod recent_files;
 pub mod session_summary;
 
-/// Populate `reg` with the four built-in modules: session summary,
-/// recent chat, processes, and recent files.
+/// Populate `reg` with the five built-in modules: session summary, recent
+/// chat, processes, recent files, and model.
 pub fn register_builtins(reg: &mut Registry) {
     reg.register(Box::new(session_summary::SessionSummary));
     reg.register(Box::new(recent_chat::RecentChat));
     reg.register(Box::new(processes::Processes));
     reg.register(Box::new(recent_files::RecentFiles));
+    reg.register(Box::new(model::Model));
 }
 
 #[cfg(test)]
@@ -158,6 +165,7 @@ pub(crate) mod tests_helpers {
             status: Status::Idle,
             ago_secs: None,
             events_scanned: false,
+            model_label: None,
             theme,
         }
     }
