@@ -73,6 +73,19 @@ impl AgentKind {
         }
     }
 
+    /// Whether this agent can be pointed at an arbitrary endpoint by a model
+    /// profile — that is, whether `base_url` / `auth_token_env` /
+    /// `max_context` mean anything for it.
+    ///
+    /// Only `claude` today. The others take a profile's `model` but reach
+    /// their endpoint through their own config, by mechanisms this crate does
+    /// not model. Saying so explicitly is what stops a profile with a
+    /// `base_url` from being pinned to them and silently doing half of what it
+    /// looks like it does.
+    pub fn supports_endpoint(self) -> bool {
+        matches!(self, AgentKind::Claude)
+    }
+
     /// Provider counterpart to [`Self::model_env`]. Only the agents that
     /// separate provider from model have one.
     pub fn provider_env(self) -> Option<&'static str> {

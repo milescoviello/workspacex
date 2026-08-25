@@ -753,7 +753,21 @@ pub fn spawn_session(
     let spawned_model = agent
         .model_env()
         .and_then(|var| selection.model_or_env(var));
-    let spawned_endpoint = selection.base_url.clone();
+    // Only claude is wired to an arbitrary endpoint. Recording one for an
+    // agent that cannot use it would make the dashboard claim a workspace is on
+    // a local server when its agent never went there.
+    let spawned_endpoint = if agent.supports_endpoint() {
+        selection.base_url.clone()
+    } else {
+        if selection.base_url.is_some() {
+            tracing::warn!(
+                agent = agent.display_name(),
+                "model profile sets base_url, but this agent reaches its endpoint through its \
+                 own config; only the model is being applied"
+            );
+        }
+        None
+    };
     let mut session = spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)?;
     session.spawned_model = spawned_model;
     session.spawned_endpoint = spawned_endpoint;

@@ -1320,6 +1320,28 @@ mod tests {
         assert!(!args.iter().any(|a| a == "--add-dir"), "got: {args:?}");
     }
 
+    /// Only claude is wired to an arbitrary endpoint. Recording one for an
+    /// agent that never used it would make the dashboard claim a workspace is
+    /// on a local server when its agent went somewhere else entirely — and the
+    /// contention count is derived from exactly that value.
+    #[test]
+    fn only_claude_can_be_pointed_at_an_endpoint() {
+        use crate::pty::AgentKind;
+        assert!(AgentKind::Claude.supports_endpoint());
+        for other in [
+            AgentKind::Pi,
+            AgentKind::Hermes,
+            AgentKind::Codex,
+            AgentKind::Omp,
+        ] {
+            assert!(
+                !other.supports_endpoint(),
+                "{} claims endpoint support it does not have",
+                other.display_name()
+            );
+        }
+    }
+
     /// Pointing an agent at a local model server is the whole reason profiles
     /// exist, and for Claude Code it is four separate things — endpoint, token,
     /// context window and model name — none of which existed here before.

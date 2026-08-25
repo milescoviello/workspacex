@@ -508,6 +508,7 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                             eprintln!("warning: could not pin the model profile: {e}");
                         } else {
                             println!("pinned to model profile {name}");
+                            warn_if_endpoint_unusable(&store, name, agent_kind);
                         }
                     }
                     Ok(None) => eprintln!("warning: new workspace has no primary agent to pin"),
@@ -733,9 +734,16 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                     )));
                 }
             }
+            let target_agent = store
+                .workspace_agents_by_id(target)?
+                .map(|i| i.agent)
+                .unwrap_or(ws.agent);
             store.set_instance_model_profile(target, name.as_deref())?;
             match name.as_deref() {
-                Some(n) => println!("pinned to model profile {n} (applies on next spawn)"),
+                Some(n) => {
+                    println!("pinned to model profile {n} (applies on next spawn)");
+                    warn_if_endpoint_unusable(&store, n, target_agent);
+                }
                 None => println!("model profile cleared (applies on next spawn)"),
             }
         }
@@ -928,4 +936,29 @@ pub(super) fn capture_model_env(
         return Ok(());
     };
     store.set_instance_model(target, model.as_deref(), provider.as_deref())
+}
+
+/// Warn when a profile carries endpoint settings the chosen agent cannot use.
+///
+/// Not an error: pinning a profile for its `model` alone is perfectly
+/// reasonable. But `base_url` silently doing nothing is the kind of thing that
+/// looks configured and is not, so it has to be said out loud at the moment
+/// someone asks for it — the only moment they are present to hear it.
+fn warn_if_endpoint_unusable(
+    store: &crate::data::store::Store,
+    profile: &str,
+    agent: crate::pty::AgentKind,
+) {
+    if agent.supports_endpoint() {
+        return;
+    }
+    if let Ok(Some(p)) = crate::commands::model_profiles::lookup(store, profile) {
+        if p.base_url.is_some() {
+            eprintln!(
+                "warning: profile '{profile}' sets base_url, but {} reaches its endpoint \
+                 through its own config — only the model will be applied",
+                agent.display_name()
+            );
+        }
+    }
 }

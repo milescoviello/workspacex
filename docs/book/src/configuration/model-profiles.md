@@ -36,6 +36,30 @@ spawns. A `base_url` with no scheme, or a `max_context` of zero, can only be a
 mistake — and left to spawn time it surfaces as an opaque failure inside an
 agent, long after the person who typed it has moved on.
 
+## Which agents can use which fields
+
+| Agent | `model` | `base_url` / `auth_token_env` / `max_context` |
+| --- | --- | --- |
+| `claude` | yes | **yes** |
+| `pi`, `hermes`, `codex`, `omp` | yes | no |
+
+Only Claude Code is wired to an arbitrary endpoint. The others accept a
+profile's `model` but reach their endpoint through their own configuration, by
+mechanisms wsx does not model — so pinning one of them to a profile that sets
+`base_url` applies the model and nothing else.
+
+That is allowed, because pinning a profile for its model alone is reasonable.
+It is not silent: the CLI warns when you pin it, and wsx records no endpoint for
+that session, so the dashboard never claims the workspace is on a server its
+agent never contacted.
+
+```console
+$ wsx workspace create backend --agent codex --profile local-qwen
+pinned to model profile local-qwen
+warning: profile 'local-qwen' sets base_url, but codex reaches its endpoint
+through its own config — only the model will be applied
+```
+
 ## Choosing a profile
 
 **In the TUI**, press `n` for a new workspace and `^p` to cycle the model, the
