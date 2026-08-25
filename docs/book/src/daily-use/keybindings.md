@@ -16,6 +16,7 @@
 | `s`                               | Open repo settings modal for the selected repo (or the parent repo when a workspace is selected)             |
 | `d`                               | Archive the selected workspace (no-op on repo header)                                                        |
 | `o`                               | Cycle how workspaces are ordered inside a repo: by recency (default) or by status. Persisted.                |
+| `?`                               | Workspace actions card for the selected workspace; `m` on it cycles that workspace's [model profile](../configuration/model-profiles.md)                          |
 | `q`                               | Quit (kills all running sessions)                                                                            |
 | `p`                               | Toggle the project-manager digest pane (opens focused, instant, no agent session)                            |
 | `Tab`                             | Swap focus between dashboard and the digest pane (when visible)                                              |

@@ -406,6 +406,40 @@ pub(super) async fn workspace_actions(
                 notice: None,
             });
         }
+        // Cycle the selected workspace's model. Handled in-modal because the
+        // dashboard has no free key for it, and this card is exactly the list
+        // of "things you can do to the selected workspace" — a model that could
+        // only be reached through the agents panel was a model nobody found.
+        KeyCode::Char('m') => {
+            if let Some(SelectionTarget::Workspace(ws_id)) = app.selected_target() {
+                let profiles = crate::commands::model_profiles::list(&app.store)?;
+                if !profiles.is_empty()
+                    && let Some(primary) = app
+                        .store
+                        .workspace_agents(ws_id)?
+                        .into_iter()
+                        .find(|i| i.is_primary)
+                {
+                    // none -> first -> … -> last -> none, so the agent's own
+                    // default stays reachable.
+                    let next = match primary.model_profile.as_deref() {
+                        None => Some(profiles[0].name.clone()),
+                        Some(current) => match profiles.iter().position(|p| p.name == current) {
+                            Some(i) => profiles.get(i + 1).map(|p| p.name.clone()),
+                            // Pinned to something since removed: start over
+                            // rather than stranding the cycle.
+                            None => Some(profiles[0].name.clone()),
+                        },
+                    };
+                    app.store
+                        .set_instance_model_profile(primary.id, next.as_deref())?;
+                    app.refresh()?;
+                }
+            }
+            // Left open on purpose: cycling is repeated, and closing after
+            // every press would make choosing the third profile take three
+            // round trips through the card.
+        }
         // Open the progress viewer for a workspace with work in flight.
         KeyCode::Char('o') => {
             if let Some(SelectionTarget::Workspace(ws_id)) = app.selected_target()

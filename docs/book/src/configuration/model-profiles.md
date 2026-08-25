@@ -62,7 +62,10 @@ through its own config — only the model will be applied
 
 ## Choosing a profile
 
-**In the TUI**, press `n` for a new workspace and `^p` to cycle the model, the
+**In the TUI** there are two places. On the dashboard, `?` opens the workspace
+actions card and `m` cycles the selected workspace's model — the card stays open
+so a third profile is a third keypress, not a third round trip. And when
+creating, `n` opens the new-workspace modal where `^p` cycles the model, the
 same way `tab` cycles the agent and `^s` toggles tmux sharing. The modal always
 shows the line, chosen or not:
 

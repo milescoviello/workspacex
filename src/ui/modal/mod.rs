@@ -423,7 +423,7 @@ pub fn render(
              v   diff        g   lazygit\n  \
              c   chronox     r   rename\n  \
              C   name color  o   setup log\n  \
-             x   cancel setup\n\n  \
+             m   model       x   cancel setup\n\n  \
              ?/Esc  close"
                 .to_string(),
         ),

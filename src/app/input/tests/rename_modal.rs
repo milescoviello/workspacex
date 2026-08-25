@@ -700,3 +700,75 @@ async fn rename_modal_typing_and_backspace_edit_buffer() {
         other => panic!("expected RenameWorkspace modal, got {other:?}"),
     }
 }
+
+/// The `?` card is the list of things you can do to the selected workspace, so
+/// the model belongs on it. Reachable only through the agents panel, it was a
+/// setting nobody found.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actions_card_m_cycles_the_selected_workspaces_model() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = App::new(
+        crate::data::store::Store::open_in_memory().unwrap(),
+        PathBuf::from("/tmp/wsx-test"),
+    )
+    .unwrap();
+    let ws_id = app.test_workspace("modelcard");
+    let primary = app
+        .store
+        .add_primary_agent(ws_id, crate::pty::session::AgentKind::Claude, 1)
+        .unwrap();
+    app.store
+        .set_setting(
+            "model_profiles",
+            "alpha base_url=http://a\nbeta base_url=http://b",
+        )
+        .unwrap();
+    app.refresh().unwrap();
+    app.selectable = vec![crate::app::SelectionTarget::Workspace(ws_id)];
+    app.select_index(0);
+    app.modal = Some(crate::ui::modal::Modal::WorkspaceActions);
+
+    let shared = std::sync::Arc::new(tokio::sync::Mutex::new(
+        App::new(
+            crate::data::store::Store::open_in_memory().unwrap(),
+            PathBuf::from("/tmp/wsx-test"),
+        )
+        .unwrap(),
+    ));
+    let pinned = |app: &App| {
+        app.store
+            .workspace_agents_by_id(primary.id)
+            .unwrap()
+            .unwrap()
+            .model_profile
+    };
+    let press = async |app: &mut App| {
+        handle_key_modal(
+            app,
+            &shared,
+            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+        )
+        .await
+        .unwrap();
+    };
+
+    assert_eq!(pinned(&app), None);
+    press(&mut app).await;
+    assert_eq!(pinned(&app).as_deref(), Some("alpha"));
+    press(&mut app).await;
+    assert_eq!(pinned(&app).as_deref(), Some("beta"));
+    press(&mut app).await;
+    assert_eq!(
+        pinned(&app),
+        None,
+        "past the last profile returns to default"
+    );
+
+    // The card stays open: cycling is repeated, and reopening it between
+    // presses would make picking the third profile three round trips.
+    assert!(
+        matches!(app.modal, Some(crate::ui::modal::Modal::WorkspaceActions)),
+        "the actions card must stay open while cycling"
+    );
+}
