@@ -740,11 +740,16 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 .unwrap_or(ws.agent);
             store.set_instance_model_profile(target, name.as_deref())?;
             match name.as_deref() {
+                // A shared workspace keeps its agent alive inside a tmux
+                // server across detaches, and `tmux new-session -A` re-attaches
+                // to that session rather than re-running the command — so a new
+                // environment never reaches it. "Next spawn" would be a
+                // promise nothing intends to keep.
                 Some(n) => {
-                    println!("pinned to model profile {n} (applies on next spawn)");
+                    println!("pinned to model profile {n} ({})", when_applies(&ws));
                     warn_if_endpoint_unusable(&store, n, target_agent);
                 }
-                None => println!("model profile cleared (applies on next spawn)"),
+                None => println!("model profile cleared ({})", when_applies(&ws)),
             }
         }
         CliAction::AgentAdd { kind } => {
@@ -960,5 +965,20 @@ fn warn_if_endpoint_unusable(
                 agent.display_name()
             );
         }
+    }
+}
+
+/// When a model change will actually take effect, in words that are true for
+/// the workspace in hand.
+///
+/// A direct workspace respawns its agent on the next attach. A tmux-shared one
+/// does not: the agent lives in a tmux server that outlives the client, and
+/// `new-session -A` re-attaches to it instead of re-running the command, so the
+/// change waits for that session to end.
+fn when_applies(ws: &crate::data::store::Workspace) -> &'static str {
+    if ws.shared {
+        "applies when this workspace's tmux session is restarted, not on re-attach"
+    } else {
+        "applies on next spawn"
     }
 }

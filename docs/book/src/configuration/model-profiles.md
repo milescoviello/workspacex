@@ -108,6 +108,19 @@ and the `model` detail-bar module says the same thing on its second line. To
 apply it now, restart that agent — archive and recreate the workspace, or kill
 the agent so it respawns.
 
+### Shared workspaces wait longer
+
+A [tmux-shared](../integrations/shared-workspaces.md) workspace keeps its agent
+alive inside a tmux server that outlives the client, and re-attaching runs
+`tmux new-session -A`, which **attaches to the surviving session rather than
+re-running the command**. A new model therefore does not arrive on re-attach the
+way it does for a direct workspace — it waits for that tmux session to end.
+
+Both surfaces say so: the CLI prints *"applies when this workspace's tmux
+session is restarted, not on re-attach"*, and the detail bar reads
+`other on tmux restart`. To apply it, end the session — `wsx workspace unshare`,
+or kill it directly with `tmux kill-session -t wsx-<repo>-<slug>`.
+
 `wsx agent list` shows what each instance is pinned to:
 
 ```console

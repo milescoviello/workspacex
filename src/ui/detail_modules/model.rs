@@ -12,6 +12,21 @@ use ratatui::text::{Line, Span};
 
 pub struct Model;
 
+/// When a pending model will take effect, phrased truthfully for this
+/// workspace.
+///
+/// A tmux-shared workspace keeps its agent in a tmux server that outlives the
+/// client, and `new-session -A` re-attaches to it rather than re-running the
+/// command — so re-attaching does not apply anything. Saying "on next spawn"
+/// there would promise something that never happens.
+fn when_applies(ctx: &DetailContext<'_>) -> &'static str {
+    if ctx.workspace.shared {
+        "on tmux restart"
+    } else {
+        "on next spawn"
+    }
+}
+
 impl DetailModule for Model {
     fn id(&self) -> &'static str {
         "model"
@@ -46,14 +61,14 @@ impl DetailModule for Model {
             (true, Some(model)) => {
                 push(&mut lines, model.to_string());
                 if let Some(pending) = ctx.model_pending.as_deref() {
-                    push(&mut lines, format!("{pending} on next spawn"));
+                    push(&mut lines, format!("{pending} {}", when_applies(ctx)));
                 }
             }
             // Running on the agent's own default, which is a real answer.
             (true, None) => {
                 push(&mut lines, "(agent default)".to_string());
                 if let Some(pending) = ctx.model_pending.as_deref() {
-                    push(&mut lines, format!("{pending} on next spawn"));
+                    push(&mut lines, format!("{pending} {}", when_applies(ctx)));
                 }
             }
         }
@@ -145,6 +160,30 @@ mod tests {
             text_of(&Model.lines(&ctx, 40)),
             vec!["(agent default)", "local-qwen on next spawn"]
         );
+    }
+
+    /// A tmux-shared workspace keeps its agent alive in a tmux server across
+    /// detaches, and re-attaching does not re-run the command — so promising
+    /// "on next spawn" there is promising something that never happens.
+    #[test]
+    fn a_shared_workspace_says_when_the_change_can_actually_land() {
+        let mut ctx = stub_context();
+        ctx.agent_live = true;
+        ctx.model_running = Some("qwen3.8-27b".to_string());
+        ctx.model_pending = Some("other".to_string());
+
+        assert_eq!(
+            text_of(&Model.lines(&ctx, 60))[1],
+            "other on next spawn",
+            "a direct workspace does respawn on attach"
+        );
+
+        let shared = crate::data::store::Workspace {
+            shared: true,
+            ..ctx.workspace.clone()
+        };
+        ctx.workspace = &shared;
+        assert_eq!(text_of(&Model.lines(&ctx, 60))[1], "other on tmux restart");
     }
 
     #[test]
