@@ -31,6 +31,33 @@ gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GP
 A profile must set at least one of `base_url` or `model`, or it would do
 nothing. Blank lines and `#` comments are ignored.
 
+## Pinning a workspace to a profile
+
+At creation:
+
+```bash
+wsx workspace create backend --name add-widgets --profile local-qwen
+```
+
+or afterwards, from inside the worktree:
+
+```bash
+wsx agent profile local-qwen    # pin
+wsx agent profile --clear       # back to the recorded model, then the environment
+```
+
+Either takes effect on the agent's next spawn. A name that does not resolve is
+refused at this point — before a worktree exists, in the `create` case — and the
+error lists the profiles that do exist. Clearing must be asked for with
+`--clear`: a half-typed command should not silently unpin a workspace.
+
+`wsx agent list` shows what each instance is pinned to:
+
+```console
+$ wsx agent list
+1  claude  (primary)  [local-qwen]
+```
+
 ## Tokens are referenced, never stored
 
 `auth_token_env` holds the *name* of an environment variable, and the token is

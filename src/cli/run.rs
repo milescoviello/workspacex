@@ -449,9 +449,31 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             yolo,
             shared,
             agent,
+            profile,
             prompt,
         } => {
             let r = lookup_repo(&store, &repo)?;
+            // Checked before anything is created. A typo'd profile name is a
+            // typo, not a preference, and discovering it after a worktree and
+            // branch already exist leaves the caller cleaning up. (At spawn the
+            // opposite rule applies: a name that stopped resolving must not make
+            // an existing workspace unopenable.)
+            if let Some(name) = profile.as_deref() {
+                if crate::commands::model_profiles::lookup(&store, name)?.is_none() {
+                    let known = crate::commands::model_profiles::list(&store)?
+                        .into_iter()
+                        .map(|p| p.name)
+                        .collect::<Vec<_>>();
+                    let known = if known.is_empty() {
+                        "none are configured; see `wsx config edit model_profiles`".to_string()
+                    } else {
+                        format!("known: {}", known.join(", "))
+                    };
+                    return Err(Error::UserInput(format!(
+                        "no model profile named '{name}' ({known})"
+                    )));
+                }
+            }
             let worktree_base = dirs.app_dir().join("worktrees");
             std::fs::create_dir_all(&worktree_base)?;
             // Inherit yolo + agent kind from the workspace this command runs
@@ -479,6 +501,19 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 created.workspace.name,
                 created.workspace.worktree_path.display()
             );
+            if let Some(name) = profile.as_deref() {
+                match store.primary_instance_id(created.workspace.id) {
+                    Ok(Some(target)) => {
+                        if let Err(e) = store.set_instance_model_profile(target, Some(name)) {
+                            eprintln!("warning: could not pin the model profile: {e}");
+                        } else {
+                            println!("pinned to model profile {name}");
+                        }
+                    }
+                    Ok(None) => eprintln!("warning: new workspace has no primary agent to pin"),
+                    Err(e) => eprintln!("warning: could not pin the model profile: {e}"),
+                }
+            }
             if let Err(e) = capture_model_env(&store, created.workspace.id, agent_kind) {
                 // The worktree exists; a lost model pin is not worth aborting
                 // over, but it must not pass silently either — the agent would
@@ -624,7 +659,15 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             let ws = resolve_current_workspace(&store)?;
             for inst in store.workspace_agents(ws.id)? {
                 let tag = if inst.is_primary { "  (primary)" } else { "" };
-                println!("{}  {}{}", inst.id.0, inst.label(), tag);
+                // Show what the instance will actually spawn on, not just what
+                // is stored: a profile and a recorded model are different
+                // things and the difference is invisible otherwise.
+                let model = match (&inst.model_profile, &inst.model) {
+                    (Some(p), _) => format!("  [{p}]"),
+                    (None, Some(m)) => format!("  [{m}]"),
+                    (None, None) => String::new(),
+                };
+                println!("{}  {}{}{}", inst.id.0, inst.label(), tag, model);
             }
         }
         CliAction::AgentSend {
@@ -658,6 +701,37 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             match workspace.as_deref() {
                 Some(_) => println!("queued message to {target} in {}", target_ws.name),
                 None => println!("queued message to {target}"),
+            }
+        }
+        CliAction::AgentProfile { name } => {
+            let ws = resolve_current_workspace(&store)?;
+            let target = store.primary_instance_id(ws.id)?.ok_or_else(|| {
+                Error::UserInput("this workspace has no primary agent".to_string())
+            })?;
+            if let Some(name) = name.as_deref() {
+                // Same fail-fast rule as `workspace create --profile`: a name
+                // typed just now that does not resolve is a typo worth saying
+                // so about, even though a name that stops resolving later is
+                // tolerated at spawn.
+                if crate::commands::model_profiles::lookup(&store, name)?.is_none() {
+                    let known = crate::commands::model_profiles::list(&store)?
+                        .into_iter()
+                        .map(|p| p.name)
+                        .collect::<Vec<_>>();
+                    let known = if known.is_empty() {
+                        "none are configured; see `wsx config edit model_profiles`".to_string()
+                    } else {
+                        format!("known: {}", known.join(", "))
+                    };
+                    return Err(Error::UserInput(format!(
+                        "no model profile named '{name}' ({known})"
+                    )));
+                }
+            }
+            store.set_instance_model_profile(target, name.as_deref())?;
+            match name.as_deref() {
+                Some(n) => println!("pinned to model profile {n} (applies on next spawn)"),
+                None => println!("model profile cleared (applies on next spawn)"),
             }
         }
         CliAction::AgentAdd { kind } => {

@@ -96,6 +96,9 @@ pub enum CliAction {
         yolo: bool,
         shared: bool,
         agent: Option<String>,
+        /// Pin the new workspace's primary agent to this `model_profiles`
+        /// entry. Unlike the agent kind, this can be changed afterwards.
+        profile: Option<String>,
         /// Seed the new workspace's primary agent with this prompt, as if
         /// `wsx agent send` had been run against it immediately after.
         prompt: Option<String>,
@@ -151,6 +154,13 @@ pub enum CliAction {
         /// `<repo>/<slug>` when addressing an agent in ANOTHER workspace;
         /// `None` means the current workspace (the pre-existing behavior).
         workspace: Option<String>,
+    },
+    /// Pin (or unpin) the current workspace's primary agent to a named
+    /// `model_profiles` entry, after the workspace already exists.
+    AgentProfile {
+        /// `None` clears the pin, returning the instance to the model recorded
+        /// at creation time and then to the ambient environment.
+        name: Option<String>,
     },
     AgentAdd {
         kind: String,

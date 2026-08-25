@@ -64,9 +64,25 @@ pub(in crate::cli) fn parse_agent(it: &mut Args) -> Result<CliAction> {
             }
             Ok(CliAction::AgentAdd { kind })
         }
+        Some("profile") => {
+            let arg = it.next();
+            match arg.as_deref() {
+                // `--clear` rather than a bare missing argument: dropping a pin
+                // is destructive enough that it should be asked for by name,
+                // not achieved by forgetting to type something.
+                Some("--clear") => Ok(CliAction::AgentProfile { name: None }),
+                Some(name) if !name.starts_with('-') => Ok(CliAction::AgentProfile {
+                    name: Some(name.to_string()),
+                }),
+                _ => Err(Error::Usage {
+                    group: None,
+                    msg: "agent profile <name|--clear>".into(),
+                }),
+            }
+        }
         _ => Err(Error::Usage {
             group: None,
-            msg: "agent <list|send|add> ...".into(),
+            msg: "agent <list|send|add|profile> ...".into(),
         }),
     }
 }

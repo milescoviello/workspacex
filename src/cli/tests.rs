@@ -779,6 +779,7 @@ fn parses_workspace_create_minimal() {
             shared,
             agent: None,
             prompt,
+            ..
         } => {
             assert_eq!(repo, "backend");
             assert!(name.is_none());
@@ -809,6 +810,7 @@ fn parses_workspace_create_with_name_and_yolo() {
             shared,
             agent: None,
             prompt: None,
+            ..
         } => {
             assert_eq!(repo, "backend");
             assert_eq!(name.as_deref(), Some("add-widgets"));
@@ -865,6 +867,7 @@ fn parses_workspace_create_prompt_alongside_other_flags() {
             shared,
             agent,
             prompt,
+            ..
         } => {
             assert_eq!(repo, "backend");
             assert_eq!(name.as_deref(), Some("flaky-tests"));
@@ -1008,6 +1011,7 @@ async fn workspace_create_with_prompt_queues_it_to_the_new_primary() {
             yolo: false,
             shared: false,
             agent: None,
+            profile: None,
             prompt: Some("fix the flaky tests".to_string()),
         },
         &dirs,
@@ -1067,6 +1071,7 @@ async fn workspace_create_without_prompt_queues_nothing() {
             yolo: false,
             shared: false,
             agent: None,
+            profile: None,
             prompt: None,
         },
         &dirs,
@@ -1907,4 +1912,43 @@ fn capture_model_env_records_the_creating_process_environment() {
         let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
         assert_eq!(row.model, None);
     }
+}
+
+#[test]
+fn parses_workspace_create_with_a_model_profile() {
+    match parse(&["workspace", "create", "backend", "--profile", "local-qwen"]).unwrap() {
+        CliAction::WorkspaceCreate { profile, .. } => {
+            assert_eq!(profile.as_deref(), Some("local-qwen"));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn workspace_create_profile_requires_a_value() {
+    let err = parse(&["workspace", "create", "backend", "--profile"]).unwrap_err();
+    assert!(
+        err.to_string().contains("--profile needs value"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn parses_agent_profile_set_and_clear() {
+    match parse(&["agent", "profile", "local-qwen"]).unwrap() {
+        CliAction::AgentProfile { name } => assert_eq!(name.as_deref(), Some("local-qwen")),
+        other => panic!("unexpected: {other:?}"),
+    }
+    match parse(&["agent", "profile", "--clear"]).unwrap() {
+        CliAction::AgentProfile { name } => assert_eq!(name, None),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+/// Dropping a pin has to be asked for by name. If a bare `agent profile` meant
+/// "clear", a half-typed command would silently unpin a workspace.
+#[test]
+fn agent_profile_needs_a_name_or_an_explicit_clear() {
+    let err = parse(&["agent", "profile"]).unwrap_err();
+    assert!(err.to_string().contains("--clear"), "got: {err}");
 }

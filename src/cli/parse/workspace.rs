@@ -38,13 +38,14 @@ pub(in crate::cli) fn parse_workspace(it: &mut Args) -> Result<CliAction> {
             let repo = it.next().ok_or_else(|| Error::Usage {
                 group: None,
                 msg:
-                    "workspace create <repo> [--name <slug>] [--yolo] [--shared] [--agent claude|pi|hermes|codex|omp] [--prompt <text>]"
+                    "workspace create <repo> [--name <slug>] [--yolo] [--shared] [--agent claude|pi|hermes|codex|omp] [--profile <name>] [--prompt <text>]"
                         .into(),
             })?;
             let mut name: Option<String> = None;
             let mut yolo = false;
             let mut shared = false;
             let mut agent: Option<String> = None;
+            let mut profile: Option<String> = None;
             let mut prompt: Option<String> = None;
             while let Some(arg) = it.next() {
                 match arg.as_str() {
@@ -62,6 +63,13 @@ pub(in crate::cli) fn parse_workspace(it: &mut Args) -> Result<CliAction> {
                     }
                     "--yolo" => yolo = true,
                     "--shared" => shared = true,
+                    "--profile" => {
+                        profile = Some(it.next().ok_or_else(|| Error::Usage {
+                            group: None,
+                            msg: "--profile needs value (a name from `wsx config get model_profiles`)"
+                                .into(),
+                        })?);
+                    }
                     "--agent" => {
                         agent =
                             Some(
@@ -105,6 +113,7 @@ pub(in crate::cli) fn parse_workspace(it: &mut Args) -> Result<CliAction> {
                 yolo,
                 shared,
                 agent,
+                profile,
                 prompt,
             })
         }
