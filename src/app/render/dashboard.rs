@@ -216,7 +216,17 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                     &mut app.detail_scroll_last_workspace,
                     Some(ws.id),
                 );
+                // Straight off the roster the app already keeps, so the draw
+                // path stays query-free. Profile name first: it is what the
+                // user chose, where `model` is what happened to be exported
+                // when the workspace was made.
+                let model_label = app
+                    .agent_roster
+                    .get(&ws.id)
+                    .and_then(|instances| instances.iter().find(|i| i.is_primary))
+                    .and_then(|i| i.model_profile.as_deref().or(i.model.as_deref()));
                 let mut inputs = crate::ui::dashboard::detail::DetailInputs {
+                    model_label,
                     repo,
                     workspace: ws,
                     events: app.workspace_events.get(&ws.id),

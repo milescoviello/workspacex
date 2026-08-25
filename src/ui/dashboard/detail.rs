@@ -43,6 +43,10 @@ pub struct DetailInputs<'a> {
     pub ago_secs: Option<u64>,
     pub reply_draft: &'a str,
     pub reply_focused: bool,
+    /// Presentation-ready model label for the primary agent — pinned profile
+    /// name, else the model recorded at creation. Resolved by the caller from
+    /// the cached agent roster so the draw path performs no query.
+    pub model_label: Option<&'a str>,
     /// True once the workspace's JSONL has been scanned at least once
     /// (`workspace_events_scanned` on `App`). When false, SESSION
     /// SUMMARY and RECENT CHAT show `loading…` placeholders instead
@@ -273,6 +277,7 @@ fn render_body_region(
         .split(area);
 
     let ctx = crate::ui::detail_modules::DetailContext {
+        model_label: inputs.model_label,
         repo: inputs.repo,
         workspace: inputs.workspace,
         events: inputs.events,
@@ -856,6 +861,7 @@ mod tests {
             let cfg = DetailBarConfig::default();
             let mut offsets = [0u16; 4];
             let mut inputs = DetailInputs {
+                model_label: None,
                 repo: &repo,
                 workspace: &ws,
                 events: None,
@@ -1150,6 +1156,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1205,6 +1212,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1254,6 +1262,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1309,6 +1318,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1352,6 +1362,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1402,6 +1413,7 @@ mod tests {
         ];
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1456,6 +1468,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1513,6 +1526,7 @@ mod tests {
         }];
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1716,6 +1730,7 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
+            model_label: None,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1795,6 +1810,7 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
+            model_label: None,
             repo: &repo,
             workspace: &workspace,
             events: None,
@@ -1847,6 +1863,7 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
+            model_label: None,
             repo: &repo,
             workspace: &workspace,
             events: None,
@@ -1897,6 +1914,7 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
+            model_label: None,
             repo: &repo,
             workspace: &workspace,
             events: None,
