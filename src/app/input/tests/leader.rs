@@ -73,6 +73,7 @@ async fn ctrl_x_d_closes_focused_pane_when_split() {
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 crate::pty::session::AgentKind::Claude,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
     }
@@ -178,6 +179,7 @@ async fn ctrl_x_d_detach_schedules_refresh_for_attached_workspace() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let target = test_target(&app, id);
@@ -270,6 +272,7 @@ async fn ctrl_x_shift_d_detach_schedules_refresh_for_attached_workspace() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let target = test_target(&app, id);
@@ -348,6 +351,7 @@ async fn ctrl_x_arrow_moves_focus_in_split() {
                 crate::agent::remote_control::RemoteOpts::disabled(),
                 crate::pty::session::AgentKind::Claude,
                 None,
+                &crate::pty::ModelSelection::default(),
             )
             .unwrap();
     }
@@ -425,6 +429,7 @@ async fn ctrl_x_down_enter_fires_highlighted_action() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let target = test_target(&app, id);
@@ -513,6 +518,7 @@ async fn ctrl_x_esc_dismisses_nav_overlay_without_detaching() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let target = test_target(&app, id);

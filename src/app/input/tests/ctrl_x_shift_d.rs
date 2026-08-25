@@ -67,6 +67,7 @@ async fn ctrl_x_shift_d_saves_layout_and_returns_to_dashboard() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let second_mode = crate::pty::session::SpawnMode::Fresh {
@@ -88,6 +89,7 @@ async fn ctrl_x_shift_d_saves_layout_and_returns_to_dashboard() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 

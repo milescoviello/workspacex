@@ -219,6 +219,7 @@ async fn ctrl_x_digit_works_while_reply_focused() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 

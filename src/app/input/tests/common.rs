@@ -155,6 +155,7 @@ pub(super) fn spawn_attached_workspace(app: &mut App) -> crate::data::store::Wor
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     app.view = crate::ui::View::Attached(AttachedState::single(test_target(app, ws_id)));

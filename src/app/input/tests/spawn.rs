@@ -434,6 +434,7 @@ async fn toggle_to_shared_without_tmux_is_a_noop_with_modal() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     app.refresh().unwrap();
@@ -596,6 +597,7 @@ async fn toggle_unshare_respawns_primary_seeded_after_last_refresh() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     assert!(
@@ -858,6 +860,7 @@ async fn shared_workspace_with_running_added_instance_is_not_detached() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 
@@ -958,6 +961,7 @@ async fn shared_workspace_with_instance_added_after_last_refresh_is_not_detached
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Codex,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
 

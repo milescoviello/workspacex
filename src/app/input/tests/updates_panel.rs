@@ -428,6 +428,7 @@ async fn updates_panel_v_splits_attached_view_vertically() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let second_mode = crate::pty::session::SpawnMode::Fresh {
@@ -449,6 +450,7 @@ async fn updates_panel_v_splits_attached_view_vertically() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     let first_target = test_target(&app, first_id);
@@ -1411,6 +1413,7 @@ async fn attached_view_shows_status_row_for_other_workspace_needing_attention() 
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     app.view = crate::ui::View::Attached(AttachedState::single(test_target(&app, attached_id)));
@@ -1494,6 +1497,7 @@ async fn attached_view_no_status_row_when_no_other_activity() {
             crate::agent::remote_control::RemoteOpts::disabled(),
             crate::pty::session::AgentKind::Claude,
             None,
+            &crate::pty::ModelSelection::default(),
         )
         .unwrap();
     app.view = crate::ui::View::Attached(AttachedState::single(test_target(&app, attached_id)));
