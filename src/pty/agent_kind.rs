@@ -58,6 +58,36 @@ impl AgentKind {
         self.display_name()
     }
 
+    /// Environment variable that overrides this agent's model, if it has one.
+    ///
+    /// `claude` has no such variable today — it is the only one of the five
+    /// without a model override — so it answers `None` and a create-time
+    /// capture simply records nothing for it.
+    ///
+    /// The names live here rather than inline at each spawn site so the
+    /// capture path (which reads them) and the builders (which fall back to
+    /// them) cannot drift apart.
+    pub fn model_env(self) -> Option<&'static str> {
+        match self {
+            AgentKind::Claude => None,
+            AgentKind::Pi => Some("WSX_PI_MODEL"),
+            AgentKind::Hermes => Some("WSX_HERMES_MODEL"),
+            AgentKind::Codex => Some("WSX_CODEX_MODEL"),
+            AgentKind::Omp => Some("WSX_OMP_MODEL"),
+        }
+    }
+
+    /// Provider counterpart to [`Self::model_env`]. Only the agents that
+    /// separate provider from model have one.
+    pub fn provider_env(self) -> Option<&'static str> {
+        match self {
+            AgentKind::Pi => Some("WSX_PI_PROVIDER"),
+            AgentKind::Hermes => Some("WSX_HERMES_PROVIDER"),
+            AgentKind::Omp => Some("WSX_OMP_PROVIDER"),
+            AgentKind::Claude | AgentKind::Codex => None,
+        }
+    }
+
     pub fn from_store(store: &crate::data::store::Store) -> Self {
         Self::from_str_or_default(store.get_setting("coding_agent").ok().flatten().as_deref())
     }

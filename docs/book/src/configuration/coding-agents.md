@@ -15,6 +15,41 @@ Supported agents:
 | `codex`            | `--agent codex`  | `codex` binary (override via `WSX_CODEX_BIN`)                             | `~/.codex/config.toml`                    |
 | `omp`              | `--agent omp`    | `omp` binary, [oh-my-pi](https://github.com/can1357/oh-my-pi) (override via `WSX_OMP_BIN`) | `~/.omp/agent/config.yml` |
 
+### How a model selection is resolved
+
+Setting a model variable on `wsx workspace create` records that choice on the new
+workspace's **primary agent row** in `state.db`, and it is read back from there every
+time the agent spawns:
+
+```bash
+WSX_OMP_MODEL=qwen3.8-27b wsx workspace create backend --agent omp
+```
+
+This matters because `workspace create` does not start an agent — it prepares the
+worktree, queues any starter prompt, and exits. The agent is spawned later by the TUI,
+in a different process that cannot see the environment of the one that created the
+workspace. Without the recorded value the variable would simply be lost, and the
+workspace would come up on whatever the TUI itself was launched with.
+
+Resolution order at spawn, highest first:
+
+1. the model/provider recorded on the agent row at creation time,
+2. `WSX_<AGENT>_MODEL` / `WSX_<AGENT>_PROVIDER` in the environment of the process that
+   spawns the agent — normally the TUI.
+
+So an exported variable still applies to every workspace that has no recorded choice of
+its own, which is the behaviour that predates this and is unchanged. A workspace that
+does have one keeps it across restarts, and a process-wide variable will not override it.
+
+Selections are stored per *agent instance*, not per workspace: a multi-agent workspace
+can therefore run different agents on different models in the same worktree. Blank
+values (`export FOO=$UNSET` expands to `""`) read as "not set" rather than being
+forwarded to the agent.
+
+Creating a workspace from inside the TUI does not record anything, because there the
+creating and spawning processes are the same one — nothing is lost by leaving the value
+ambient, and pinning it would stop an exported variable from applying after a relaunch.
+
 ### Hermes integration
 
 When a workspace uses `coding_agent: hermes`, wsx spawns `hermes` (or the path in `WSX_HERMES_BIN`) instead of `claude`. Hermes runs in classic REPL mode and receives wsx custom instructions and auto-rename directives.
@@ -38,7 +73,7 @@ The block is rewritten every time Hermes spawns and automatically cleaned up whe
 
 **Session-tail**: wsx tails `~/.hermes/state.db` (sqlite) to populate the dashboard's RECENT CHAT, SESSION SUMMARY, and last-message columns for Hermes workspaces. The following fields are populated: last assistant text, first user prompt, stop reason, tool-use counts, and per-event snapshots (user messages, assistant text, and tool calls — including `ran \`<cmd>\`` display for terminal/bash tool invocations). Tool-use counts treat all Hermes tool names as "other" for now — categorization into read/edit/write/bash buckets is a follow-up since Hermes uses lowercase tool names rather than Claude's capitalized convention. Still missing compared to Claude/Pi: edited-files tracking and pending-tool-use timing for permission-prompt detection.
 
-**Environment overrides**: configure Hermes via `~/.hermes/config.yaml` (persistent settings), or set `WSX_HERMES_MODEL` and `WSX_HERMES_PROVIDER` to override per-workspace:
+**Environment overrides**: configure Hermes via `~/.hermes/config.yaml` (persistent settings), or set `WSX_HERMES_MODEL` and `WSX_HERMES_PROVIDER` to override per-workspace (see [How a model selection is resolved](#how-a-model-selection-is-resolved)):
 
 ```bash
 WSX_HERMES_MODEL=llama-3-70b-instruct WSX_HERMES_PROVIDER=together wsx workspace create backend --agent hermes

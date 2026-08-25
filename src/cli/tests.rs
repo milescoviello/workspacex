@@ -1831,3 +1831,80 @@ fn menubar_group_help_renders() {
     assert!(h.contains("plugin"));
     assert!(h.contains("copy-path"));
 }
+
+/// Seed a workspace whose primary agent is `agent`, and return both ids.
+fn seed_ws_for_capture(
+    agent: crate::pty::AgentKind,
+) -> (
+    crate::data::store::Store,
+    crate::data::store::WorkspaceId,
+    crate::data::store::AgentInstanceId,
+) {
+    use crate::data::store::{NewWorkspace, Store};
+    let store = Store::open_in_memory().unwrap();
+    let repo = store
+        .add_repo(std::path::Path::new("/tmp/cap"), "cap", "wsx")
+        .unwrap();
+    let ws = store
+        .insert_workspace(&NewWorkspace {
+            repo_id: repo,
+            name: "w",
+            branch: "wsx/w",
+            worktree_path: std::path::Path::new("/tmp/cap/w"),
+            yolo: false,
+            agent,
+            shared: false,
+        })
+        .unwrap();
+    store.add_primary_agent(ws, agent, 1).unwrap();
+    let inst = store.primary_instance_id(ws).unwrap().unwrap();
+    (store, ws, inst)
+}
+
+/// `workspace create` exits without spawning anything, so a `WSX_*_MODEL` on
+/// that command is the last moment the value exists. Recording it onto the
+/// primary agent row is what carries the caller's intent across to the TUI
+/// process that eventually starts the agent.
+///
+/// One test for all branches: `EnvGuard` serializes on a process-wide lock, so
+/// separate `#[test]` fns would only contend on it.
+#[test]
+fn capture_model_env_records_the_creating_process_environment() {
+    use crate::cli::run::capture_model_env;
+    use crate::pty::AgentKind;
+    use crate::test_support::EnvGuard;
+
+    // Recorded for an agent that has a model variable.
+    {
+        let (store, ws, inst) = seed_ws_for_capture(AgentKind::Omp);
+        let mut env = EnvGuard::new();
+        env.set("WSX_OMP_MODEL", "qwen3.8-27b");
+        env.remove("WSX_OMP_PROVIDER");
+        capture_model_env(&store, ws, AgentKind::Omp).unwrap();
+        let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(row.model.as_deref(), Some("qwen3.8-27b"));
+    }
+
+    // Nothing exported → nothing pinned, so the ambient environment still
+    // governs later spawns exactly as it does today.
+    {
+        let (store, ws, inst) = seed_ws_for_capture(AgentKind::Omp);
+        let mut env = EnvGuard::new();
+        env.remove("WSX_OMP_MODEL");
+        env.remove("WSX_OMP_PROVIDER");
+        capture_model_env(&store, ws, AgentKind::Omp).unwrap();
+        let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(row.model, None);
+    }
+
+    // claude has no model variable yet, so an unrelated export must not be
+    // mistaken for one.
+    {
+        let (store, ws, inst) = seed_ws_for_capture(AgentKind::Claude);
+        let mut env = EnvGuard::new();
+        env.set("WSX_OMP_MODEL", "not-for-claude");
+        capture_model_env(&store, ws, AgentKind::Claude).unwrap();
+        let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(row.model, None);
+    }
+}
