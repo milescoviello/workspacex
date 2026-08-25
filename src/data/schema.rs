@@ -156,6 +156,27 @@ impl Store {
             self.add_column_if_missing("workspaces", "name_color", "name_color INTEGER")?;
             self.conn().execute("PRAGMA user_version = 22", [])?;
         }
+        if v < 23 {
+            // Per-instance model/provider selection. Until now these were read
+            // from the ambient process environment at spawn time, which made a
+            // workspace's model a property of however the TUI happened to be
+            // launched rather than of the workspace: `WSX_*_MODEL` set on a
+            // `workspace create` never reached the agent at all, because create
+            // only queues the starter prompt and the spawn happens later, in the
+            // TUI process. Storing the choice on the instance row is what makes
+            // it durable across restarts and identical from every entry point.
+            //
+            // On `workspace_agents` rather than `workspaces` on purpose: the row
+            // is one agent instance, so a multi-agent workspace can run a cloud
+            // model and a local one side by side in the same worktree.
+            //
+            // Both nullable with no DEFAULT — "no choice recorded" has to stay
+            // distinguishable from an empty string, since the former falls back
+            // to the environment and the latter would suppress the flag.
+            self.add_column_if_missing("workspace_agents", "model", "model TEXT")?;
+            self.add_column_if_missing("workspace_agents", "provider", "provider TEXT")?;
+            self.conn().execute("PRAGMA user_version = 23", [])?;
+        }
         Ok(())
     }
 
