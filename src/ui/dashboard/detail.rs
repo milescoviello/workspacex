@@ -43,10 +43,10 @@ pub struct DetailInputs<'a> {
     pub ago_secs: Option<u64>,
     pub reply_draft: &'a str,
     pub reply_focused: bool,
-    /// Presentation-ready model label for the primary agent — pinned profile
-    /// name, else the model recorded at creation. Resolved by the caller from
-    /// the cached agent roster so the draw path performs no query.
-    pub model_label: Option<&'a str>,
+    /// What the primary agent is running on, and what it will switch to on its
+    /// next spawn when a pin has changed under it. See `DetailContext`.
+    pub model_running: Option<String>,
+    pub model_pending: Option<String>,
     /// Other workspaces with a live agent on the same endpoint. See
     /// `App::endpoint_peer_count`.
     pub endpoint_peers: usize,
@@ -280,7 +280,8 @@ fn render_body_region(
         .split(area);
 
     let ctx = crate::ui::detail_modules::DetailContext {
-        model_label: inputs.model_label,
+        model_running: inputs.model_running.clone(),
+        model_pending: inputs.model_pending.clone(),
         endpoint_peers: inputs.endpoint_peers,
         repo: inputs.repo,
         workspace: inputs.workspace,
@@ -865,7 +866,8 @@ mod tests {
             let cfg = DetailBarConfig::default();
             let mut offsets = [0u16; 4];
             let mut inputs = DetailInputs {
-                model_label: None,
+                model_running: None,
+                model_pending: None,
                 endpoint_peers: 0,
                 repo: &repo,
                 workspace: &ws,
@@ -1161,7 +1163,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1218,7 +1221,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1269,7 +1273,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1326,7 +1331,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1371,7 +1377,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1423,7 +1430,8 @@ mod tests {
         ];
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1479,7 +1487,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1538,7 +1547,8 @@ mod tests {
         }];
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1743,7 +1753,8 @@ mod tests {
         let reg = make_registry();
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
@@ -1824,7 +1835,8 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,
@@ -1878,7 +1890,8 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,
@@ -1930,7 +1943,8 @@ mod tests {
         let (_store, repo, workspace) = seed_workspace();
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,

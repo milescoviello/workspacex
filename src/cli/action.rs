@@ -161,6 +161,10 @@ pub enum CliAction {
         /// `None` clears the pin, returning the instance to the model recorded
         /// at creation time and then to the ambient environment.
         name: Option<String>,
+        /// Which agent in the workspace, by label (`claude`, `claude#2`, …).
+        /// `None` targets the primary. Same addressing as `agent send`, so a
+        /// multi-agent workspace can run its agents on different models.
+        target: Option<String>,
     },
     AgentAdd {
         kind: String,

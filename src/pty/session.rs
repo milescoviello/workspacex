@@ -147,6 +147,16 @@ pub struct Session {
     /// only the client (agent survives — the shared-workspace persistence
     /// contract); `kill_backend()` also kills the server session.
     pub tmux_session: Option<String>,
+    /// The model this session actually started on, and the endpoint it was
+    /// pointed at. Fixed at spawn, because a process's environment is.
+    ///
+    /// Deliberately separate from the instance row: the row is what the
+    /// workspace *will* use next time, and the two differ for every agent that
+    /// was already running when its pin changed. Anything that reports on a
+    /// live agent — the model panel, the contention count — has to read these
+    /// rather than the row, or it reports intentions as facts.
+    pub spawned_model: Option<String>,
+    pub spawned_endpoint: Option<String>,
 }
 
 impl Session {
@@ -582,6 +592,8 @@ impl Session {
             killer: Mutex::new(Box::new(NoopKiller)),
             prompt: Arc::new(Mutex::new(PromptCapture::default())),
             tmux_session: None,
+            spawned_model: None,
+            spawned_endpoint: None,
         }
     }
 }
@@ -735,7 +747,17 @@ pub fn spawn_session(
         child_cmd.env("WSX_AGENT_INSTANCE_ID", id.instance_id.to_string());
     }
     let reportable = resolved_binary(agent);
-    spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)
+    // Record what this spawn actually resolved to, before the command is
+    // consumed. The builders above already applied it; capturing it here is
+    // what lets the UI distinguish a running agent's model from its row's.
+    let spawned_model = agent
+        .model_env()
+        .and_then(|var| selection.model_or_env(var));
+    let spawned_endpoint = selection.base_url.clone();
+    let mut session = spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)?;
+    session.spawned_model = spawned_model;
+    session.spawned_endpoint = spawned_endpoint;
+    Ok(session)
 }
 
 /// Agent-agnostic spawn path: opens a PTY, optionally wraps the command in
@@ -879,6 +901,8 @@ pub fn spawn_command_session(
         killer: Mutex::new(killer),
         prompt,
         tmux_session: tmux.map(str::to_string),
+        spawned_model: None,
+        spawned_endpoint: None,
     })
 }
 
@@ -953,6 +977,27 @@ impl SessionManager {
         status: SessionStatus,
     ) {
         self.sessions.insert(id, Arc::new(Session::fake(status)));
+    }
+
+    /// Like [`Self::insert_fake_session`], but with the endpoint and model the
+    /// session is pretending to have spawned against.
+    ///
+    /// Contention and the model panel both read what a session *started* with
+    /// rather than what its row says now, so testing either needs a fake that
+    /// can carry those — otherwise the tests could only ever assert the
+    /// intention, which is the bug they exist to prevent.
+    #[cfg(test)]
+    pub fn insert_fake_session_spawned_on(
+        &mut self,
+        id: crate::data::store::AgentInstanceId,
+        status: SessionStatus,
+        model: Option<&str>,
+        endpoint: Option<&str>,
+    ) {
+        let mut session = Session::fake(status);
+        session.spawned_model = model.map(str::to_string);
+        session.spawned_endpoint = endpoint.map(str::to_string);
+        self.sessions.insert(id, Arc::new(session));
     }
 
     pub fn remove(&mut self, id: crate::data::store::AgentInstanceId) {

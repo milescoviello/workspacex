@@ -17,13 +17,19 @@ In the TUI, press `Ctrl-x a` while a workspace is selected to open the **agents 
 
 Newly added agents spawn immediately with the workspace's context injected. The primary can't be removed from the panel — it lives for the life of the workspace.
 
-Each attached agent shows what it will spawn on in `[brackets]`: the model
-profile it is pinned to, else the model recorded when the workspace was created.
-`p` walks the primary through the configured profiles and then back off the end,
-so the agent's own default is always reachable without leaving the panel. It is
-a cycle rather than a picker because the profile list is short and user-defined,
-and a second modal on top of a modal earns nothing for a list that is usually
-two entries long. `wsx agent profile <name|--clear>` is the CLI equivalent.
+Each attached agent shows its model in `[brackets]`. When a pin has changed
+since that agent started, both are shown — `[claude-opus → local-qwen next
+spawn]` — because a process's environment is fixed when it starts, so the change
+waits for a respawn. Without that arrow the keypress looks like it did nothing.
+
+`p` walks the **primary** agent through the configured profiles and then back
+off the end, so the agent's own default is always reachable without leaving the
+panel. It is a cycle rather than a picker because the profile list is short and
+user-defined, and a second modal on top of a modal earns nothing for a list that
+is usually two entries long.
+
+To pin a non-primary agent, address it by label from the CLI:
+`wsx agent profile --agent claude#2 local-qwen`.
 
 From the CLI, the equivalent of the panel's "add" is:
 

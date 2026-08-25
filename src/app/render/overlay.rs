@@ -97,10 +97,16 @@ pub(super) fn draw_modal(f: &mut ratatui::Frame, app: &mut App, area: ratatui::l
             workspace_id,
             selected,
         } => {
-            let agents = app
+            let agents: Vec<(crate::data::agents::AgentInstance, Option<String>)> = app
                 .store
                 .workspace_agents(*workspace_id)
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .into_iter()
+                .map(|inst| {
+                    let running = app.instance_running_model(&inst);
+                    (inst, running)
+                })
+                .collect();
             crate::ui::modal::render_agents_panel(f, area, &agents, *selected, &app.theme);
         }
         crate::ui::modal::Modal::UsageWindowPicker { .. } => {

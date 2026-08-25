@@ -63,10 +63,21 @@ pub(in crate::app::input) async fn handle_key_modal(
             yolo,
             shared: ws_shared,
             agent,
+            profile,
             notice: _,
         } => {
-            workspace::new_workspace(app, shared, k, repo_id, name_buffer, yolo, ws_shared, agent)
-                .await?
+            workspace::new_workspace(
+                app,
+                shared,
+                k,
+                repo_id,
+                name_buffer,
+                yolo,
+                ws_shared,
+                agent,
+                profile,
+            )
+            .await?
         }
         Modal::ConfirmArchive {
             workspace_id,

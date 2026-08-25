@@ -68,8 +68,8 @@ pub static GROUPS: &[GroupInfo] = &[
                 blurb: "Queue an async message to an agent here or in another workspace",
             },
             CmdInfo {
-                usage: "profile <name|--clear>",
-                blurb: "Pin this workspace's agent to a model profile",
+                usage: "profile [--agent <label>] <name|--clear>",
+                blurb: "Pin an agent in this workspace to a model profile",
             },
         ],
     },

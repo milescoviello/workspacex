@@ -44,6 +44,7 @@ async fn enter_with_a_taken_name_shows_inline_notice_and_does_not_spawn() {
         yolo: false,
         shared: false,
         agent: crate::pty::session::AgentKind::Claude,
+        profile: None,
         notice: None,
     });
     let shared = dummy_shared();
@@ -57,6 +58,7 @@ async fn enter_with_a_taken_name_shows_inline_notice_and_does_not_spawn() {
     match &app.modal {
         Some(crate::ui::modal::Modal::NewWorkspace {
             name_buffer,
+            profile: None,
             notice,
             ..
         }) => {
@@ -91,6 +93,7 @@ async fn typing_after_a_duplicate_notice_clears_it() {
         yolo: false,
         shared: false,
         agent: crate::pty::session::AgentKind::Claude,
+        profile: None,
         notice: Some("a workspace named 'alpha' already exists".to_string()),
     });
     let shared = dummy_shared();
@@ -104,6 +107,7 @@ async fn typing_after_a_duplicate_notice_clears_it() {
     match &app.modal {
         Some(crate::ui::modal::Modal::NewWorkspace {
             name_buffer,
+            profile: None,
             notice,
             ..
         }) => {
@@ -111,5 +115,97 @@ async fn typing_after_a_duplicate_notice_clears_it() {
             assert!(notice.is_none(), "editing must clear the stale notice");
         }
         other => panic!("expected NewWorkspace modal, got {other:?}"),
+    }
+}
+
+/// `^p` walks the new-workspace modal through the configured profiles and back
+/// to the agent's default, without disturbing the name being typed.
+///
+/// Creation is the only moment a model choice applies without a respawn, so if
+/// it cannot be made here the feature is effectively CLI-only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_p_cycles_the_model_profile_in_the_new_workspace_modal() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let (mut app, repo_id) = app_with_existing_workspace();
+    app.store
+        .set_setting(
+            "model_profiles",
+            "alpha base_url=http://a\nbeta base_url=http://b",
+        )
+        .unwrap();
+    app.modal = Some(crate::ui::modal::Modal::NewWorkspace {
+        repo_id,
+        name_buffer: "typed-so-far".to_string(),
+        yolo: false,
+        shared: false,
+        agent: crate::pty::session::AgentKind::Claude,
+        profile: None,
+        notice: None,
+    });
+    let shared = dummy_shared();
+
+    let state = |app: &App| -> (Option<String>, String) {
+        match app.modal.as_ref() {
+            Some(crate::ui::modal::Modal::NewWorkspace {
+                profile,
+                name_buffer,
+                ..
+            }) => (profile.clone(), name_buffer.clone()),
+            other => panic!("expected the NewWorkspace modal, got {other:?}"),
+        }
+    };
+    let press = async |app: &mut App| {
+        handle_key_modal(
+            app,
+            &shared,
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        )
+        .await
+        .unwrap();
+    };
+
+    press(&mut app).await;
+    assert_eq!(state(&app).0.as_deref(), Some("alpha"));
+    press(&mut app).await;
+    assert_eq!(state(&app).0.as_deref(), Some("beta"));
+    press(&mut app).await;
+    assert_eq!(
+        state(&app).0,
+        None,
+        "past the last profile returns to the agent default"
+    );
+    assert_eq!(
+        state(&app).1,
+        "typed-so-far",
+        "cycling the model must not disturb the name being typed"
+    );
+}
+
+/// With no profiles configured the key is inert rather than erroring — there is
+/// simply nothing to choose.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_p_is_inert_when_no_profiles_are_configured() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let (mut app, repo_id) = app_with_existing_workspace();
+    app.modal = Some(crate::ui::modal::Modal::NewWorkspace {
+        repo_id,
+        name_buffer: String::new(),
+        yolo: false,
+        shared: false,
+        agent: crate::pty::session::AgentKind::Claude,
+        profile: None,
+        notice: None,
+    });
+    let shared = dummy_shared();
+    handle_key_modal(
+        &mut app,
+        &shared,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+    )
+    .await
+    .unwrap();
+    match app.modal.as_ref() {
+        Some(crate::ui::modal::Modal::NewWorkspace { profile, .. }) => assert_eq!(*profile, None),
+        other => panic!("expected the NewWorkspace modal, got {other:?}"),
     }
 }

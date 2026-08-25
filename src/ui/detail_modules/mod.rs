@@ -33,11 +33,18 @@ pub struct DetailContext<'a> {
     pub status: Status,
     pub ago_secs: Option<u64>,
     pub events_scanned: bool,
-    /// Presentation-ready model label for the workspace's primary agent: the
-    /// pinned profile name, else the model recorded at creation, else `None`
-    /// for "whatever the environment says". Resolved by the caller from the
-    /// already-cached agent roster, so no module performs a query.
-    pub model_label: Option<&'a str>,
+    /// What the primary agent is **running** on right now — read from the live
+    /// session, so it is a fact rather than an intention. `None` when nothing
+    /// is running or the agent took its own default.
+    ///
+    /// Owned rather than borrowed: it lives behind the `Arc<Session>` that
+    /// `SessionManager::get` hands back by value, and the detail bar renders
+    /// one workspace per draw, so this is a single small clone.
+    pub model_running: Option<String>,
+    /// What the primary agent **will** use on its next spawn, when that differs
+    /// from what it is running. `None` when they agree — the common case, where
+    /// showing both would be noise.
+    pub model_pending: Option<String>,
     /// How many *other* workspaces currently have a running agent pointed at
     /// the same endpoint as this one. Zero when nothing is shared, which is
     /// every workspace that is not on a profile with a `base_url`.
@@ -169,7 +176,8 @@ pub(crate) mod tests_helpers {
             status: Status::Idle,
             ago_secs: None,
             events_scanned: false,
-            model_label: None,
+            model_running: None,
+            model_pending: None,
             endpoint_peers: 0,
             theme,
         }

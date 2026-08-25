@@ -1936,13 +1936,40 @@ fn workspace_create_profile_requires_a_value() {
 #[test]
 fn parses_agent_profile_set_and_clear() {
     match parse(&["agent", "profile", "local-qwen"]).unwrap() {
-        CliAction::AgentProfile { name } => assert_eq!(name.as_deref(), Some("local-qwen")),
+        CliAction::AgentProfile { name, target } => {
+            assert_eq!(name.as_deref(), Some("local-qwen"));
+            assert_eq!(target, None, "no --agent means the primary");
+        }
         other => panic!("unexpected: {other:?}"),
     }
     match parse(&["agent", "profile", "--clear"]).unwrap() {
-        CliAction::AgentProfile { name } => assert_eq!(name, None),
+        CliAction::AgentProfile { name, target } => {
+            assert_eq!(name, None);
+            assert_eq!(target, None);
+        }
         other => panic!("unexpected: {other:?}"),
     }
+}
+
+/// A multi-agent workspace can run its agents on different models, so pinning
+/// has to be able to address one of them — same labels as `agent send`.
+#[test]
+fn parses_agent_profile_targeting_a_specific_agent() {
+    match parse(&["agent", "profile", "--agent", "claude#2", "local-qwen"]).unwrap() {
+        CliAction::AgentProfile { name, target } => {
+            assert_eq!(name.as_deref(), Some("local-qwen"));
+            assert_eq!(target.as_deref(), Some("claude#2"));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+/// A name and `--clear` together is contradictory; guessing which one was
+/// meant would silently do the opposite of half of it.
+#[test]
+fn agent_profile_refuses_a_name_and_clear_together() {
+    let err = parse(&["agent", "profile", "x", "--clear"]).unwrap_err();
+    assert!(err.to_string().contains("not both"), "got: {err}");
 }
 
 /// Dropping a pin has to be asked for by name. If a bare `agent profile` meant

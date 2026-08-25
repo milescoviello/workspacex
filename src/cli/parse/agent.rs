@@ -65,20 +65,45 @@ pub(in crate::cli) fn parse_agent(it: &mut Args) -> Result<CliAction> {
             Ok(CliAction::AgentAdd { kind })
         }
         Some("profile") => {
-            let arg = it.next();
-            match arg.as_deref() {
-                // `--clear` rather than a bare missing argument: dropping a pin
-                // is destructive enough that it should be asked for by name,
-                // not achieved by forgetting to type something.
-                Some("--clear") => Ok(CliAction::AgentProfile { name: None }),
-                Some(name) if !name.starts_with('-') => Ok(CliAction::AgentProfile {
-                    name: Some(name.to_string()),
-                }),
-                _ => Err(Error::Usage {
-                    group: None,
-                    msg: "agent profile <name|--clear>".into(),
-                }),
+            let mut name: Option<String> = None;
+            let mut clear = false;
+            let mut target: Option<String> = None;
+            while let Some(arg) = it.next() {
+                match arg.as_str() {
+                    // `--clear` rather than a bare missing argument: dropping a
+                    // pin is destructive enough that it should be asked for by
+                    // name, not achieved by forgetting to type something.
+                    "--clear" => clear = true,
+                    "--agent" => {
+                        target = Some(it.next().ok_or_else(|| Error::Usage {
+                            group: None,
+                            msg: "--agent needs a label (claude, claude#2, …)".into(),
+                        })?);
+                    }
+                    other if !other.starts_with('-') && name.is_none() => {
+                        name = Some(other.to_string());
+                    }
+                    other => {
+                        return Err(Error::Usage {
+                            group: None,
+                            msg: format!("agent profile: unexpected argument '{other}'"),
+                        });
+                    }
+                }
             }
+            if clear && name.is_some() {
+                return Err(Error::Usage {
+                    group: None,
+                    msg: "agent profile: pass a name or --clear, not both".into(),
+                });
+            }
+            if !clear && name.is_none() {
+                return Err(Error::Usage {
+                    group: None,
+                    msg: "agent profile [--agent <label>] <name|--clear>".into(),
+                });
+            }
+            Ok(CliAction::AgentProfile { name, target })
         }
         _ => Err(Error::Usage {
             group: None,

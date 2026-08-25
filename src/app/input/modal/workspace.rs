@@ -24,6 +24,7 @@ pub(super) async fn new_workspace(
     yolo: bool,
     ws_shared: bool,
     mut agent: crate::pty::session::AgentKind,
+    profile: Option<String>,
 ) -> Result<()> {
     match k.code {
         KeyCode::Esc => {
@@ -43,6 +44,32 @@ pub(super) async fn new_workspace(
                 yolo,
                 shared: ws_shared,
                 agent,
+                profile: profile.clone(),
+                notice: None,
+            });
+        }
+        KeyCode::Char('p') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Cycle none -> first -> ... -> last -> none, so the agent's own
+            // default stays reachable. Ctrl-modified because every printable
+            // key belongs to the name field, and this mirrors `^s`.
+            let profiles = crate::commands::model_profiles::list(&app.store)?;
+            let next = match profile.as_deref() {
+                _ if profiles.is_empty() => None,
+                None => Some(profiles[0].name.clone()),
+                Some(current) => match profiles.iter().position(|p| p.name == current) {
+                    Some(i) => profiles.get(i + 1).map(|p| p.name.clone()),
+                    // Pinned to something that has since been removed: start
+                    // over rather than stranding the cycle.
+                    None => Some(profiles[0].name.clone()),
+                },
+            };
+            app.modal = Some(Modal::NewWorkspace {
+                repo_id,
+                name_buffer,
+                yolo,
+                shared: ws_shared,
+                agent,
+                profile: next,
                 notice: None,
             });
         }
@@ -53,6 +80,7 @@ pub(super) async fn new_workspace(
                 yolo,
                 shared: !ws_shared,
                 agent,
+                profile: profile.clone(),
                 notice: None,
             });
         }
@@ -81,6 +109,7 @@ pub(super) async fn new_workspace(
                         yolo,
                         shared: ws_shared,
                         agent,
+                        profile: profile.clone(),
                         notice: Some(format!("a workspace named '{n}' already exists")),
                     });
                     return Ok(());
@@ -100,6 +129,7 @@ pub(super) async fn new_workspace(
             app.modal = None;
             let shared_clone = shared.clone();
             let name_for_reconcile = final_name.clone();
+            let profile_for_pin = profile.clone();
             tokio::spawn(async move {
                 let result = crate::data::workspace::create_with_app(
                     shared_clone.clone(),
@@ -113,6 +143,22 @@ pub(super) async fn new_workspace(
                     cancel,
                 )
                 .await;
+                // Pin before reconciling, so the workspace is already
+                // pinned by the time it can be attached to. Creation is the
+                // only moment a pin applies without a respawn.
+                if let (Some(name), Ok(created)) = (profile_for_pin.as_deref(), result.as_ref()) {
+                    let app = shared_clone.lock().await;
+                    match app.store.primary_instance_id(created.workspace.id) {
+                        Ok(Some(target)) => {
+                            if let Err(e) = app.store.set_instance_model_profile(target, Some(name))
+                            {
+                                tracing::warn!(error = %e, "failed to pin the model profile");
+                            }
+                        }
+                        Ok(None) => tracing::warn!("new workspace has no primary agent to pin"),
+                        Err(e) => tracing::warn!(error = %e, "failed to resolve the primary agent"),
+                    }
+                }
                 reconcile_create_result(
                     shared_clone,
                     create_gen,
@@ -131,6 +177,7 @@ pub(super) async fn new_workspace(
                 yolo,
                 shared: ws_shared,
                 agent,
+                profile: profile.clone(),
                 notice: None,
             });
         }
@@ -142,6 +189,7 @@ pub(super) async fn new_workspace(
                 yolo,
                 shared: ws_shared,
                 agent,
+                profile: profile.clone(),
                 notice: None,
             });
         }

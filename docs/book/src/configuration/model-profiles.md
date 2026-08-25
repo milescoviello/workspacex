@@ -31,25 +31,53 @@ gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GP
 A profile must set at least one of `base_url` or `model`, or it would do
 nothing. Blank lines and `#` comments are ignored.
 
-## Pinning a workspace to a profile
+## Choosing a profile
 
-At creation:
+**In the TUI**, press `n` for a new workspace and `^p` to cycle the model, the
+same way `tab` cycles the agent and `^s` toggles tmux sharing. The modal always
+shows the line, chosen or not:
+
+```text
+name: add-widgets
+agent: claude  [tab] toggle
+model: local-qwen  [^p] cycles
+shared (tmux): off — ^s toggles
+```
+
+Creation is the one moment a choice applies immediately, because nothing has
+spawned yet.
+
+**From the CLI**, at creation or afterwards:
 
 ```bash
 wsx workspace create backend --name add-widgets --profile local-qwen
+wsx agent profile local-qwen                    # the primary agent
+wsx agent profile --agent claude#2 local-qwen   # a specific one
+wsx agent profile --clear                       # back to the default
 ```
 
-or afterwards, from inside the worktree:
+A name that does not resolve is refused, and the error lists the names that do.
+On `create` that check runs before the worktree exists, so a typo costs nothing.
+Clearing must be spelled `--clear`, so a half-typed command cannot silently
+unpin a workspace.
 
-```bash
-wsx agent profile local-qwen    # pin
-wsx agent profile --clear       # back to the recorded model, then the environment
+## Changing the model of a *running* agent
+
+You cannot. A process's environment is fixed when it starts, so a pin applies at
+the agent's **next spawn** — this is a property of processes, not a limitation
+of the pin.
+
+Both surfaces say so rather than looking inert. The agents panel (`Ctrl-x a`)
+shows the live model and what will replace it:
+
+```text
+▎ claude  (primary)  [claude-opus → local-qwen next spawn]
+▎ claude#2           [local-qwen]
 ```
 
-Either takes effect on the agent's next spawn. A name that does not resolve is
-refused at this point — before a worktree exists, in the `create` case — and the
-error lists the profiles that do exist. Clearing must be asked for with
-`--clear`: a half-typed command should not silently unpin a workspace.
+and the `model` detail-bar module says the same thing on its second line. To
+apply it now, restart that agent — archive and recreate the workspace, or kill
+the agent so it respawns.
 
 `wsx agent list` shows what each instance is pinned to:
 

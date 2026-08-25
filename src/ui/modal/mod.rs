@@ -36,6 +36,13 @@ pub enum Modal {
         yolo: bool,
         shared: bool,
         agent: crate::pty::session::AgentKind,
+        /// Model profile to pin the new workspace's primary agent to, cycled
+        /// with `^p`. `None` means the agent's own default.
+        ///
+        /// Chosen here rather than only on the CLI because pinning after the
+        /// fact cannot take effect until the agent respawns — creation is the
+        /// one moment the choice applies immediately.
+        profile: Option<String>,
         /// Inline error line (e.g. a duplicate name), cleared on next edit.
         /// Mirrors `RenameWorkspace`'s `notice` field.
         notice: Option<String>,
@@ -242,10 +249,17 @@ pub fn render(
             yolo,
             shared,
             agent,
+            profile,
             notice,
             ..
         } => {
             let agent_label = agent.display_name();
+            // Named even when unset: a line that only appears once a profile is
+            // chosen would never tell anyone the key exists.
+            let model_line = format!(
+                "model: {}  [^p] cycles\n",
+                profile.as_deref().unwrap_or("(agent default)")
+            );
             let shared_line = if *shared {
                 "shared (tmux): on — ^s toggles\n"
             } else {
@@ -262,7 +276,7 @@ pub fn render(
                     "new workspace"
                 },
                 format!(
-                    "name: {name_buffer}\nagent: {agent_label}  [tab] toggle\n{shared_line}\n{notice_line}[enter] create   [esc] cancel"
+                    "name: {name_buffer}\nagent: {agent_label}  [tab] toggle\n{model_line}{shared_line}\n{notice_line}[enter] create   [esc] cancel"
                 ),
             )
         }
@@ -557,6 +571,42 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn new_workspace_modal(profile: Option<&str>) -> Modal {
+        Modal::NewWorkspace {
+            repo_id: RepoId(1),
+            name_buffer: "widgets".to_string(),
+            yolo: false,
+            shared: false,
+            agent: crate::pty::session::AgentKind::Claude,
+            profile: profile.map(str::to_string),
+            notice: None,
+        }
+    }
+
+    /// The model line is always drawn, chosen or not. A line that only appeared
+    /// once a profile was picked could never tell anyone the key exists — which
+    /// is how the choice ends up being CLI-only in practice.
+    #[test]
+    fn new_workspace_always_advertises_the_model_key() {
+        let text = render_to_text(&new_workspace_modal(None), &HashMap::new());
+        assert!(
+            text.contains("model: (agent default)"),
+            "unset model must still be named:\n{text}"
+        );
+        assert!(text.contains("^p"), "the key must be discoverable:\n{text}");
+    }
+
+    #[test]
+    fn new_workspace_shows_the_chosen_profile() {
+        let text = render_to_text(&new_workspace_modal(Some("local-qwen")), &HashMap::new());
+        assert!(text.contains("model: local-qwen"), "{text}");
+        // The other fields must survive the addition — the modal is a fixed
+        // height box and a new line can push things out of it.
+        assert!(text.contains("name: widgets"), "name lost:\n{text}");
+        assert!(text.contains("agent: claude"), "agent lost:\n{text}");
+        assert!(text.contains("[enter] create"), "footer lost:\n{text}");
     }
 
     #[test]

@@ -233,10 +233,39 @@ impl App {
         })
     }
 
-    /// The endpoint an instance resolves to, or `None` when it is not pinned
-    /// to a profile that names one. Two instances sharing a return value here
-    /// are competing for the same server.
-    pub fn instance_endpoint(&self, inst: &crate::data::agents::AgentInstance) -> Option<&str> {
+    /// The endpoint an instance's **running** agent is actually pointed at.
+    ///
+    /// Read from the live session, not from the row. A process's environment is
+    /// fixed when it starts, so an instance whose pin changed while it was
+    /// running is still talking to the endpoint it was born with — and
+    /// reporting the row here would turn a queued intention into a claimed
+    /// fact. That mistake made the contention count wrong: a workspace pinned
+    /// to a local profile but running on the cloud was counted as sharing the
+    /// local server.
+    pub fn instance_running_endpoint(
+        &self,
+        inst: &crate::data::agents::AgentInstance,
+    ) -> Option<String> {
+        let session = self.sessions.get(inst.id)?;
+        session.spawned_endpoint.clone()
+    }
+
+    /// The model an instance's running agent actually started on.
+    pub fn instance_running_model(
+        &self,
+        inst: &crate::data::agents::AgentInstance,
+    ) -> Option<String> {
+        let session = self.sessions.get(inst.id)?;
+        session.spawned_model.clone()
+    }
+
+    /// The endpoint an instance *would* use on its next spawn, from its pin.
+    /// Differs from [`Self::instance_running_endpoint`] exactly when a pin has
+    /// been changed since the agent started.
+    pub fn instance_pinned_endpoint(
+        &self,
+        inst: &crate::data::agents::AgentInstance,
+    ) -> Option<&str> {
         let name = inst.model_profile.as_deref()?;
         self.model_profiles
             .iter()
@@ -265,7 +294,7 @@ impl App {
                 // that is not running is not queued on the endpoint.
                 instances.iter().any(|inst| {
                     self.instance_is_running(inst.id)
-                        && self.instance_endpoint(inst) == Some(endpoint)
+                        && self.instance_running_endpoint(inst).as_deref() == Some(endpoint)
                 })
             })
             .count()
@@ -278,6 +307,18 @@ impl App {
     /// registered in the DB, killed by a previous wsx quit — keeps its bar,
     /// since sessions never survive a restart and the roster is the only
     /// record that the agent exists.
+    ///
+    /// Reads the cached `agent_roster`, so it can lag behind the DB by up to
+    /// one `refresh()` — fine for the dashboard render path this feeds, but
+    /// wrong for a caller that just mutated the roster and needs the result
+    /// to reflect that mutation immediately (see `toggle_workspace_shared`,
+    /// which filters its own freshly-fetched instance list instead of
+    /// calling this).
+    /// The workspace's agent instances that currently have a running
+    /// session, in roster order (primary first). Instances registered in
+    /// the DB but with no session — never started, or exited — are
+    /// excluded: nothing reaps an instance row when its agent exits, so
+    /// "registered" and "running" diverge permanently.
     ///
     /// Reads the cached `agent_roster`, so it can lag behind the DB by up to
     /// one `refresh()` — fine for the dashboard render path this feeds, but
@@ -836,52 +877,105 @@ mod strip_instances_tests {
         }
     }
 
-    /// Contention is about *live* agents on the *same* endpoint. A workspace
-    /// pinned to the same profile but not running is not competing for
-    /// anything, and two workspaces on different endpoints never are.
+    /// Contention is about what agents are **actually running on**, not what
+    /// their rows say they will use next time.
+    ///
+    /// The distinction is the whole point: a workspace pinned to a local
+    /// profile whose agent is still running against the cloud is not competing
+    /// for the local server, and counting it produced a visibly wrong number on
+    /// the dashboard.
     #[test]
-    fn endpoint_peer_count_counts_only_live_agents_on_the_same_endpoint() {
+    fn endpoint_peer_count_counts_what_is_running_not_what_is_pinned() {
+        const LOCAL: &str = "http://127.0.0.1:8091";
         let mut app = test_app();
         app.store
-            .set_setting(
-                "model_profiles",
-                "local base_url=http://127.0.0.1:8091\nremote base_url=http://elsewhere:8091",
-            )
+            .set_setting("model_profiles", &format!("local base_url={LOCAL}"))
             .unwrap();
 
-        let pin = |app: &mut App, name: &str, profile: &str, live: bool| {
+        // `spawned_on` is what the agent actually started against; `pin` is
+        // what its row says now. Real life lets them disagree.
+        let seed = |app: &mut App, name: &str, pin: Option<&str>, spawned_on: Option<&str>| {
             let ws = app.test_workspace(name);
-            // `test_workspace` inserts the row only; the real create path is
-            // what seeds a primary instance, so do it explicitly here.
             let inst = app
                 .store
                 .add_primary_agent(ws, AgentKind::Claude, 1)
                 .unwrap()
                 .id;
-            app.store
-                .set_instance_model_profile(inst, Some(profile))
-                .unwrap();
-            if live {
-                app.test_spawn_session(inst, SessionStatus::Running { pid: 1 });
+            if let Some(pin) = pin {
+                app.store
+                    .set_instance_model_profile(inst, Some(pin))
+                    .unwrap();
+            }
+            if let Some(endpoint) = spawned_on {
+                app.sessions.insert_fake_session_spawned_on(
+                    inst,
+                    SessionStatus::Running { pid: 1 },
+                    Some("qwen3.8-27b"),
+                    Some(endpoint),
+                );
             }
             app.refresh().unwrap();
             ws
         };
 
-        let a = pin(&mut app, "alpha", "local", true);
-        let _b = pin(&mut app, "beta", "local", true);
-        let _idle = pin(&mut app, "gamma", "local", false);
-        let _other = pin(&mut app, "delta", "remote", true);
+        let subject = seed(&mut app, "subject", Some("local"), Some(LOCAL));
+        let _peer = seed(&mut app, "peer", Some("local"), Some(LOCAL));
+        // Pinned to the same profile, but its running agent went to the cloud
+        // because the pin changed after it started. This is the case that was
+        // being miscounted.
+        let _pinned_but_elsewhere = seed(&mut app, "stale", Some("local"), None);
+        // Pinned and not running at all: competing for nothing.
+        let _idle = seed(&mut app, "idle", Some("local"), None);
 
         assert_eq!(
-            app.endpoint_peer_count("http://127.0.0.1:8091", a),
+            app.endpoint_peer_count(LOCAL, subject),
             1,
-            "only beta: gamma is not running and delta is on another endpoint"
+            "only the workspace whose live agent actually spawned against LOCAL"
+        );
+        assert_eq!(app.endpoint_peer_count("http://nobody:1", subject), 0);
+    }
+
+    /// The two questions the model panel asks, answered from two sources.
+    #[test]
+    fn running_and_pinned_endpoints_are_read_from_different_places() {
+        const LOCAL: &str = "http://127.0.0.1:8091";
+        let mut app = test_app();
+        app.store
+            .set_setting("model_profiles", &format!("local base_url={LOCAL}"))
+            .unwrap();
+        let ws = app.test_workspace("drift");
+        let inst = app
+            .store
+            .add_primary_agent(ws, AgentKind::Claude, 1)
+            .unwrap()
+            .id;
+        // Running on the cloud, pinned to local: the state after pressing `p`
+        // on an agent that is already up.
+        app.sessions.insert_fake_session_spawned_on(
+            inst,
+            SessionStatus::Running { pid: 1 },
+            Some("claude-opus"),
+            None,
+        );
+        app.store
+            .set_instance_model_profile(inst, Some("local"))
+            .unwrap();
+        app.refresh().unwrap();
+
+        let row = app.store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(
+            app.instance_running_model(&row).as_deref(),
+            Some("claude-opus")
         );
         assert_eq!(
-            app.endpoint_peer_count("http://nobody:1", a),
-            0,
-            "an endpoint nothing uses has no peers"
+            app.instance_running_endpoint(&row),
+            None,
+            "still on the cloud"
+        );
+        assert_eq!(
+            app.instance_pinned_endpoint(&row),
+            Some(LOCAL),
+            "the pin is real, it just has not taken effect"
         );
     }
 

@@ -40,12 +40,24 @@ clamped on save (see below).
 `recent_files`, `model`. Unknown IDs render a `[unknown: <id>]` placeholder and
 log a warning, so typos are visible but don't break the dashboard.
 
-`model` shows what the workspace's primary agent will spawn on: the
-[model profile](../configuration/model-profiles.md) it is pinned to, else the
-model recorded when it was created, else `(agent default)`. It has a slot of its
-own because the answer is otherwise invisible — the dashboard's agent column is
-a colour strip with room for one bar per agent and no text, so a workspace
-pointed at a local endpoint looks exactly like one on the default.
+`model` shows what the workspace's primary agent is **running** on, read from
+the live session rather than from its row — so it is a fact, not an intention.
+When a [model profile](../configuration/model-profiles.md) has been pinned since
+that agent started, a second line names it and says `on next spawn`. A third
+appears when other workspaces have live agents on the same endpoint, because
+those queue on one server rather than running in parallel.
+
+```text
+MODEL
+qwen3.8-27b
+local-qwen on next spawn
+shared with 1 other workspace
+```
+
+It has a slot of its own because none of this is visible elsewhere — the
+dashboard's agent column is a colour strip with room for one bar per agent and
+no text, so a workspace pointed at a local endpoint looks exactly like one on
+the default.
 
 `session_summary` leads with the workspace's recap — the same
 `goal` / `state` / `next` the Project Manager pane shows, one labeled

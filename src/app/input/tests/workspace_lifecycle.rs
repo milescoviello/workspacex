@@ -66,6 +66,7 @@ async fn ctrl_s_in_new_workspace_modal_toggles_shared() {
         yolo: false,
         shared: false,
         agent: crate::pty::session::AgentKind::Claude,
+        profile: None,
         notice: None,
     });
     let shared_app = Arc::new(Mutex::new(
@@ -132,6 +133,7 @@ async fn enter_in_new_workspace_modal_backgrounds_create_and_registers_in_flight
             yolo: false,
             shared: false,
             agent: crate::pty::session::AgentKind::Claude,
+            profile: None,
             notice: None,
         });
     }
@@ -195,6 +197,7 @@ async fn create_registers_in_flight_and_keeps_running_past_esc() {
             yolo: false,
             shared: false,
             agent: crate::pty::session::AgentKind::Claude,
+            profile: None,
             notice: None,
         });
         let enter = crossterm::event::KeyEvent::new(
@@ -668,6 +671,7 @@ async fn enter_during_setup_running_is_a_noop() {
             yolo: false,
             shared: false,
             agent: crate::pty::session::AgentKind::Claude,
+            profile: None,
             notice: None,
         });
         let enter = crossterm::event::KeyEvent::new(
@@ -723,6 +727,7 @@ async fn successful_create_after_esc_does_not_show_error_modal() {
             yolo: false,
             shared: false,
             agent: crate::pty::session::AgentKind::Claude,
+            profile: None,
             notice: None,
         });
         let enter = crossterm::event::KeyEvent::new(

@@ -216,29 +216,35 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                     &mut app.detail_scroll_last_workspace,
                     Some(ws.id),
                 );
-                // Straight off the roster the app already keeps, so the draw
-                // path stays query-free. Profile name first: it is what the
-                // user chose, where `model` is what happened to be exported
-                // when the workspace was made.
-                let model_label = app
+                // Two different questions, answered from two different
+                // places: what the agent is running on comes from the live
+                // session, what it will run on comes from the row. Conflating
+                // them is what made the contention count report a pinned but
+                // cloud-running workspace as sharing a local server.
+                let primary = app
                     .agent_roster
                     .get(&ws.id)
                     .and_then(|instances| instances.iter().find(|i| i.is_primary))
-                    .and_then(|i| i.model_profile.as_deref().or(i.model.as_deref()));
-                // Contention, computed from caches the app already holds. No
-                // individual agent can see this: workspaces sharing one local
-                // endpoint queue on a single server rather than running in
-                // parallel, which is the opposite of what the dashboard's whole
-                // shape implies.
-                let endpoint_peers = app
-                    .agent_roster
-                    .get(&ws.id)
-                    .and_then(|instances| instances.iter().find(|i| i.is_primary))
-                    .and_then(|i| app.instance_endpoint(i))
+                    .cloned();
+                let model_running = primary.as_ref().and_then(|i| app.instance_running_model(i));
+                let running_endpoint = primary
+                    .as_ref()
+                    .and_then(|i| app.instance_running_endpoint(i));
+                // Only worth showing when it differs from what is already
+                // running; otherwise it is the same fact stated twice.
+                let model_pending = primary.as_ref().and_then(|i| {
+                    let pinned = i.model_profile.as_deref()?;
+                    let pinned_endpoint = app.instance_pinned_endpoint(i);
+                    let same = pinned_endpoint.map(str::to_string) == running_endpoint;
+                    (!same).then(|| pinned.to_string())
+                });
+                let endpoint_peers = running_endpoint
+                    .as_deref()
                     .map(|endpoint| app.endpoint_peer_count(endpoint, ws.id))
                     .unwrap_or(0);
                 let mut inputs = crate::ui::dashboard::detail::DetailInputs {
-                    model_label,
+                    model_running,
+                    model_pending,
                     endpoint_peers,
                     repo,
                     workspace: ws,

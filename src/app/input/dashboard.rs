@@ -417,6 +417,7 @@ pub(in crate::app::input) async fn handle_key_dashboard(
                     yolo: false,
                     shared: false,
                     agent: crate::pty::session::AgentKind::from_store(&app.store),
+                    profile: None,
                     notice: None,
                 });
             }
@@ -444,6 +445,7 @@ pub(in crate::app::input) async fn handle_key_dashboard(
                     yolo,
                     shared: false,
                     agent: crate::pty::session::AgentKind::from_store(&app.store),
+                    profile: None,
                     notice: None,
                 });
             }
@@ -468,6 +470,7 @@ pub(in crate::app::input) async fn handle_key_dashboard(
                     yolo: false,
                     shared: true,
                     agent: crate::pty::session::AgentKind::from_store(&app.store),
+                    profile: None,
                     notice: None,
                 });
             }

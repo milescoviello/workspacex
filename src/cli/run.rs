@@ -703,11 +703,16 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 None => println!("queued message to {target}"),
             }
         }
-        CliAction::AgentProfile { name } => {
+        CliAction::AgentProfile { name, target } => {
             let ws = resolve_current_workspace(&store)?;
-            let target = store.primary_instance_id(ws.id)?.ok_or_else(|| {
-                Error::UserInput("this workspace has no primary agent".to_string())
-            })?;
+            let target = match target.as_deref() {
+                Some(label) => store.resolve_instance_label(ws.id, label)?.ok_or_else(|| {
+                    Error::UserInput(format!("no agent labelled '{label}' in this workspace"))
+                })?,
+                None => store.primary_instance_id(ws.id)?.ok_or_else(|| {
+                    Error::UserInput("this workspace has no primary agent".to_string())
+                })?,
+            };
             if let Some(name) = name.as_deref() {
                 // Same fail-fast rule as `workspace create --profile`: a name
                 // typed just now that does not resolve is a typo worth saying
