@@ -53,7 +53,7 @@ pub static GROUPS: &[GroupInfo] = &[
     },
     GroupInfo {
         name: "agent",
-        blurb: "List, add, and message agents in a workspace",
+        blurb: "List, add, message, and set the model of agents in a workspace",
         commands: &[
             CmdInfo {
                 usage: "list",
@@ -66,6 +66,10 @@ pub static GROUPS: &[GroupInfo] = &[
             CmdInfo {
                 usage: "send [--workspace <repo>/<slug>] <label> <message...>",
                 blurb: "Queue an async message to an agent here or in another workspace",
+            },
+            CmdInfo {
+                usage: "profile <name|--clear>",
+                blurb: "Pin this workspace's agent to a model profile",
             },
         ],
     },
