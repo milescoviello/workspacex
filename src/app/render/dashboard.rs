@@ -225,8 +225,21 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                     .get(&ws.id)
                     .and_then(|instances| instances.iter().find(|i| i.is_primary))
                     .and_then(|i| i.model_profile.as_deref().or(i.model.as_deref()));
+                // Contention, computed from caches the app already holds. No
+                // individual agent can see this: workspaces sharing one local
+                // endpoint queue on a single server rather than running in
+                // parallel, which is the opposite of what the dashboard's whole
+                // shape implies.
+                let endpoint_peers = app
+                    .agent_roster
+                    .get(&ws.id)
+                    .and_then(|instances| instances.iter().find(|i| i.is_primary))
+                    .and_then(|i| app.instance_endpoint(i))
+                    .map(|endpoint| app.endpoint_peer_count(endpoint, ws.id))
+                    .unwrap_or(0);
                 let mut inputs = crate::ui::dashboard::detail::DetailInputs {
                     model_label,
+                    endpoint_peers,
                     repo,
                     workspace: ws,
                     events: app.workspace_events.get(&ws.id),

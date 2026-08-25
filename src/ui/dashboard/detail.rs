@@ -47,6 +47,9 @@ pub struct DetailInputs<'a> {
     /// name, else the model recorded at creation. Resolved by the caller from
     /// the cached agent roster so the draw path performs no query.
     pub model_label: Option<&'a str>,
+    /// Other workspaces with a live agent on the same endpoint. See
+    /// `App::endpoint_peer_count`.
+    pub endpoint_peers: usize,
     /// True once the workspace's JSONL has been scanned at least once
     /// (`workspace_events_scanned` on `App`). When false, SESSION
     /// SUMMARY and RECENT CHAT show `loading…` placeholders instead
@@ -278,6 +281,7 @@ fn render_body_region(
 
     let ctx = crate::ui::detail_modules::DetailContext {
         model_label: inputs.model_label,
+        endpoint_peers: inputs.endpoint_peers,
         repo: inputs.repo,
         workspace: inputs.workspace,
         events: inputs.events,
@@ -862,6 +866,7 @@ mod tests {
             let mut offsets = [0u16; 4];
             let mut inputs = DetailInputs {
                 model_label: None,
+                endpoint_peers: 0,
                 repo: &repo,
                 workspace: &ws,
                 events: None,
@@ -1157,6 +1162,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1213,6 +1219,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1263,6 +1270,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1319,6 +1327,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1363,6 +1372,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1414,6 +1424,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1469,6 +1480,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1527,6 +1539,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: None,
@@ -1731,6 +1744,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &ws,
             events: Some(&evt),
@@ -1811,6 +1825,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,
             events: None,
@@ -1864,6 +1879,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,
             events: None,
@@ -1915,6 +1931,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_label: None,
+            endpoint_peers: 0,
             repo: &repo,
             workspace: &workspace,
             events: None,

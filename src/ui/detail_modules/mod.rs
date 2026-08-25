@@ -38,6 +38,10 @@ pub struct DetailContext<'a> {
     /// for "whatever the environment says". Resolved by the caller from the
     /// already-cached agent roster, so no module performs a query.
     pub model_label: Option<&'a str>,
+    /// How many *other* workspaces currently have a running agent pointed at
+    /// the same endpoint as this one. Zero when nothing is shared, which is
+    /// every workspace that is not on a profile with a `base_url`.
+    pub endpoint_peers: usize,
     pub theme: &'a Theme,
 }
 
@@ -166,6 +170,7 @@ pub(crate) mod tests_helpers {
             ago_secs: None,
             events_scanned: false,
             model_label: None,
+            endpoint_peers: 0,
             theme,
         }
     }

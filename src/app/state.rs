@@ -48,6 +48,7 @@ impl App {
             workspace_events: std::collections::HashMap::new(),
             pushed_status: std::collections::HashMap::new(),
             agent_roster: std::collections::HashMap::new(),
+            model_profiles: Vec::new(),
             workspace_activity: std::collections::HashMap::new(),
             workspace_events_scanned: std::collections::HashSet::new(),
             workspace_needs_attention: std::collections::HashSet::new(),
@@ -171,6 +172,10 @@ impl App {
         // here writes to the DB or reads `agent_roster`, so hoisting it this
         // early is safe.
         self.agent_roster = self.store.all_workspace_agents().unwrap_or_default();
+        // Parsed here for the same reason as the roster: the draw path needs it
+        // every frame and must not query or re-parse per frame.
+        self.model_profiles =
+            crate::commands::model_profiles::list(&self.store).unwrap_or_default();
         // Needs `self.workspaces` populated above (it iterates shared
         // workspaces) — must run after the rebuild, not before.
         self.refresh_shared_detached();
@@ -226,6 +231,44 @@ impl App {
                 crate::pty::session::SessionStatus::Exited { .. }
             )
         })
+    }
+
+    /// The endpoint an instance resolves to, or `None` when it is not pinned
+    /// to a profile that names one. Two instances sharing a return value here
+    /// are competing for the same server.
+    pub fn instance_endpoint(&self, inst: &crate::data::agents::AgentInstance) -> Option<&str> {
+        let name = inst.model_profile.as_deref()?;
+        self.model_profiles
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.base_url.as_deref())
+    }
+
+    /// How many *other* workspaces currently have a running agent pointed at
+    /// `endpoint`.
+    ///
+    /// This is the one thing no individual agent can know, and it inverts what
+    /// the rest of the dashboard implies: workspaces sharing a local endpoint
+    /// do not run in parallel, they queue on one server and divide its context
+    /// budget between them.
+    pub fn endpoint_peer_count(
+        &self,
+        endpoint: &str,
+        excluding: crate::data::store::WorkspaceId,
+    ) -> usize {
+        self.agent_roster
+            .iter()
+            .filter(|(ws, _)| **ws != excluding)
+            .filter(|(_, instances)| {
+                // Strictly running, not `strip_instances`: the strip keeps a
+                // peer whose PTY died with the previous wsx, but a process
+                // that is not running is not queued on the endpoint.
+                instances.iter().any(|inst| {
+                    self.instance_is_running(inst.id)
+                        && self.instance_endpoint(inst) == Some(endpoint)
+                })
+            })
+            .count()
     }
 
     /// The workspace's agent instances to draw on the dashboard agent strip,
@@ -509,6 +552,10 @@ pub struct App {
         crate::data::store::WorkspaceId,
         Vec<crate::data::agents::AgentInstance>,
     >,
+    /// Parsed `model_profiles`, refreshed with the roster. Cached because the
+    /// draw path resolves an endpoint every frame and must not re-parse or
+    /// re-query to do it.
+    pub model_profiles: Vec<crate::commands::model_profiles::ModelProfile>,
     /// Per-workspace tracking for attention-alert state.
     pub workspace_activity:
         std::collections::HashMap<crate::data::store::WorkspaceId, ActivityState>,
@@ -787,6 +834,55 @@ mod strip_instances_tests {
         ) {
             self.sessions.insert_fake_session(id, status);
         }
+    }
+
+    /// Contention is about *live* agents on the *same* endpoint. A workspace
+    /// pinned to the same profile but not running is not competing for
+    /// anything, and two workspaces on different endpoints never are.
+    #[test]
+    fn endpoint_peer_count_counts_only_live_agents_on_the_same_endpoint() {
+        let mut app = test_app();
+        app.store
+            .set_setting(
+                "model_profiles",
+                "local base_url=http://127.0.0.1:8091\nremote base_url=http://elsewhere:8091",
+            )
+            .unwrap();
+
+        let pin = |app: &mut App, name: &str, profile: &str, live: bool| {
+            let ws = app.test_workspace(name);
+            // `test_workspace` inserts the row only; the real create path is
+            // what seeds a primary instance, so do it explicitly here.
+            let inst = app
+                .store
+                .add_primary_agent(ws, AgentKind::Claude, 1)
+                .unwrap()
+                .id;
+            app.store
+                .set_instance_model_profile(inst, Some(profile))
+                .unwrap();
+            if live {
+                app.test_spawn_session(inst, SessionStatus::Running { pid: 1 });
+            }
+            app.refresh().unwrap();
+            ws
+        };
+
+        let a = pin(&mut app, "alpha", "local", true);
+        let _b = pin(&mut app, "beta", "local", true);
+        let _idle = pin(&mut app, "gamma", "local", false);
+        let _other = pin(&mut app, "delta", "remote", true);
+
+        assert_eq!(
+            app.endpoint_peer_count("http://127.0.0.1:8091", a),
+            1,
+            "only beta: gamma is not running and delta is on another endpoint"
+        );
+        assert_eq!(
+            app.endpoint_peer_count("http://nobody:1", a),
+            0,
+            "an endpoint nothing uses has no peers"
+        );
     }
 
     #[test]

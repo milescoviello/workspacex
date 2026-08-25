@@ -19,7 +19,7 @@ impl DetailModule for Model {
         "MODEL"
     }
     fn lines(&self, ctx: &DetailContext<'_>, width: u16) -> Vec<Line<'static>> {
-        let line = match ctx.model_label {
+        let first = match ctx.model_label {
             Some(label) => Span::styled(
                 crate::ui::text::truncate(label, width as usize),
                 ctx.theme.dim_style(),
@@ -29,7 +29,22 @@ impl DetailModule for Model {
             // reader has to interpret.
             None => Span::styled("(agent default)".to_string(), ctx.theme.dim_style()),
         };
-        vec![Line::from(line)]
+        let mut lines = vec![Line::from(first)];
+        // Only worth a line when it is actually true. A dashboard built to
+        // encourage running many agents at once should say when two of them are
+        // about to queue behind each other on one server.
+        if ctx.endpoint_peers > 0 {
+            let others = if ctx.endpoint_peers == 1 {
+                "1 other workspace".to_string()
+            } else {
+                format!("{} other workspaces", ctx.endpoint_peers)
+            };
+            lines.push(Line::from(Span::styled(
+                crate::ui::text::truncate(&format!("shared with {others}"), width as usize),
+                ctx.theme.dim_style(),
+            )));
+        }
+        lines
     }
 }
 
@@ -53,6 +68,26 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "(agent default)");
+    }
+
+    /// Silence when nothing is shared; a count only when it is real. The
+    /// singular case is the common one and reads badly as "1 other workspaces".
+    #[test]
+    fn contention_is_reported_only_when_it_exists() {
+        let mut ctx = stub_context();
+        ctx.model_label = Some("local-qwen");
+
+        assert_eq!(Model.lines(&ctx, 40).len(), 1, "no peers, no second line");
+
+        ctx.endpoint_peers = 1;
+        let lines = Model.lines(&ctx, 40);
+        let second: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(second, "shared with 1 other workspace");
+
+        ctx.endpoint_peers = 3;
+        let lines = Model.lines(&ctx, 40);
+        let second: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(second, "shared with 3 other workspaces");
     }
 
     #[test]
