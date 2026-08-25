@@ -18,6 +18,11 @@ pub struct AgentInstance {
     pub is_primary: bool,
     pub session_ref: Option<String>,
     pub created_at: i64,
+    /// Model this instance was pinned to, or `None` to fall back to the
+    /// ambient environment at spawn time. See migration 23.
+    pub model: Option<String>,
+    /// Provider counterpart to `model`, same fallback rule.
+    pub provider: Option<String>,
 }
 
 /// The single source of truth for an instance's display/address name.
@@ -49,6 +54,8 @@ fn row_to_instance(r: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         is_primary: r.get::<_, i64>(4)? != 0,
         session_ref: r.get(5)?,
         created_at: r.get(6)?,
+        model: r.get(7)?,
+        provider: r.get(8)?,
     })
 }
 
@@ -56,7 +63,7 @@ impl Store {
     /// All instances for a workspace, primary first then by creation time.
     pub fn workspace_agents(&self, ws: WorkspaceId) -> Result<Vec<AgentInstance>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
              FROM workspace_agents WHERE workspace_id = ?1
              ORDER BY is_primary DESC, created_at ASC, id ASC",
         )?;
@@ -73,7 +80,7 @@ impl Store {
         &self,
     ) -> Result<std::collections::HashMap<WorkspaceId, Vec<AgentInstance>>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
              FROM workspace_agents
              ORDER BY workspace_id ASC, is_primary DESC, created_at ASC, id ASC",
         )?;
@@ -113,6 +120,8 @@ impl Store {
             is_primary: false,
             session_ref: None,
             created_at: now,
+            model: None,
+            provider: None,
         })
     }
 
@@ -136,6 +145,8 @@ impl Store {
             is_primary: true,
             session_ref: None,
             created_at,
+            model: None,
+            provider: None,
         })
     }
 
@@ -169,6 +180,32 @@ impl Store {
             } else {
                 "cannot remove the primary agent".into()
             }));
+        }
+        Ok(())
+    }
+
+    /// Pin an instance's model / provider, or clear either back to NULL.
+    ///
+    /// Written once at workspace-creation time from the creating process's
+    /// `WSX_*_MODEL` / `WSX_*_PROVIDER`, so the choice outlives that process —
+    /// it is the TUI, not the CLI, that later spawns the agent, and it cannot
+    /// see the creator's environment. Empty strings are normalized to NULL so
+    /// `WSX_PI_MODEL=` reads as "unset" rather than as a model literally named
+    /// "", which would otherwise be forwarded as `--model ""`.
+    pub fn set_instance_model(
+        &self,
+        id: AgentInstanceId,
+        model: Option<&str>,
+        provider: Option<&str>,
+    ) -> Result<()> {
+        let model = model.map(str::trim).filter(|v| !v.is_empty());
+        let provider = provider.map(str::trim).filter(|v| !v.is_empty());
+        let n = self.conn().execute(
+            "UPDATE workspace_agents SET model = ?1, provider = ?2 WHERE id = ?3",
+            rusqlite::params![model, provider, id.0],
+        )?;
+        if n == 0 {
+            return Err(crate::error::Error::UserInput("agent not found".into()));
         }
         Ok(())
     }
@@ -236,7 +273,7 @@ impl Store {
     /// A single instance by its id.
     pub fn workspace_agents_by_id(&self, id: AgentInstanceId) -> Result<Option<AgentInstance>> {
         let mut stmt = self.conn().prepare_cached(
-            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at
+            "SELECT id, workspace_id, agent, ordinal, is_primary, session_ref, created_at, model, provider
              FROM workspace_agents WHERE id = ?1",
         )?;
         let r = stmt.query_row([id.0], row_to_instance).optional()?;
@@ -277,6 +314,47 @@ mod store_tests {
             .unwrap();
         store.add_primary_agent(ws, AgentKind::Claude, 1).unwrap();
         ws
+    }
+
+    /// A pinned model has to survive the process that chose it. `workspace
+    /// create` records the choice and exits; the TUI spawns the agent minutes
+    /// or reboots later and cannot see that process's environment, so anything
+    /// short of a round-trip through the row loses the selection entirely.
+    #[test]
+    fn set_instance_model_round_trips_through_the_row() {
+        let store = Store::open_in_memory().unwrap();
+        let ws = seed_ws_with_primary(&store);
+        let inst = store.primary_instance_id(ws).unwrap().unwrap();
+
+        // Nothing pinned at birth: the absence of a choice is what lets the
+        // ambient environment still apply.
+        let before = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(before.model, None);
+        assert_eq!(before.provider, None);
+
+        store
+            .set_instance_model(inst, Some("qwen3.8-27b"), Some("local"))
+            .unwrap();
+        let after = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(after.model.as_deref(), Some("qwen3.8-27b"));
+        assert_eq!(after.provider.as_deref(), Some("local"));
+    }
+
+    /// `export FOO=$UNSET` expands to "", and a workspace created in that shell
+    /// must not end up pinned to a model named "" — that would suppress the
+    /// environment fallback forever and hand the agent `--model ""`.
+    #[test]
+    fn set_instance_model_normalizes_blank_to_unset() {
+        let store = Store::open_in_memory().unwrap();
+        let ws = seed_ws_with_primary(&store);
+        let inst = store.primary_instance_id(ws).unwrap().unwrap();
+
+        store
+            .set_instance_model(inst, Some("  "), Some(""))
+            .unwrap();
+        let row = store.workspace_agents_by_id(inst).unwrap().unwrap();
+        assert_eq!(row.model, None, "blank must read as unset, not as a model");
+        assert_eq!(row.provider, None);
     }
 
     #[test]
