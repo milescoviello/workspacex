@@ -23,13 +23,18 @@ gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GP
 
 | Field | Meaning |
 | --- | --- |
-| `base_url` | API endpoint the agent should talk to |
+| `base_url` | API endpoint the agent should talk to. Must start with `http://` or `https://` |
 | `model` | Model name to request |
 | `auth_token_env` | **Name** of an environment variable holding the token |
-| `max_context` | Context window to advertise, when it differs from the model's default |
+| `max_context` | Context window to advertise, when it differs from the model's default. Must be greater than zero |
 
 A profile must set at least one of `base_url` or `model`, or it would do
 nothing. Blank lines and `#` comments are ignored.
+
+Everything is checked when the setting is written rather than when an agent
+spawns. A `base_url` with no scheme, or a `max_context` of zero, can only be a
+mistake — and left to spawn time it surfaces as an opaque failure inside an
+agent, long after the person who typed it has moved on.
 
 ## Choosing a profile
 

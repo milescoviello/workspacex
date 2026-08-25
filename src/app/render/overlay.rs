@@ -97,14 +97,15 @@ pub(super) fn draw_modal(f: &mut ratatui::Frame, app: &mut App, area: ratatui::l
             workspace_id,
             selected,
         } => {
-            let agents: Vec<(crate::data::agents::AgentInstance, Option<String>)> = app
+            let agents: Vec<(crate::data::agents::AgentInstance, bool, Option<String>)> = app
                 .store
                 .workspace_agents(*workspace_id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|inst| {
+                    let live = app.instance_is_running(inst.id);
                     let running = app.instance_running_model(&inst);
-                    (inst, running)
+                    (inst, live, running)
                 })
                 .collect();
             crate::ui::modal::render_agents_panel(f, area, &agents, *selected, &app.theme);

@@ -46,6 +46,8 @@ pub struct DetailInputs<'a> {
     /// What the primary agent is running on, and what it will switch to on its
     /// next spawn when a pin has changed under it. See `DetailContext`.
     pub model_running: Option<String>,
+    /// Whether the primary agent is running; see `DetailContext`.
+    pub agent_live: bool,
     pub model_pending: Option<String>,
     /// Other workspaces with a live agent on the same endpoint. See
     /// `App::endpoint_peer_count`.
@@ -281,6 +283,7 @@ fn render_body_region(
 
     let ctx = crate::ui::detail_modules::DetailContext {
         model_running: inputs.model_running.clone(),
+        agent_live: inputs.agent_live,
         model_pending: inputs.model_pending.clone(),
         endpoint_peers: inputs.endpoint_peers,
         repo: inputs.repo,
@@ -867,6 +870,7 @@ mod tests {
             let mut offsets = [0u16; 4];
             let mut inputs = DetailInputs {
                 model_running: None,
+                agent_live: false,
                 model_pending: None,
                 endpoint_peers: 0,
                 repo: &repo,
@@ -1164,6 +1168,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1222,6 +1227,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1274,6 +1280,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1332,6 +1339,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1378,6 +1386,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1431,6 +1440,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1488,6 +1498,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1548,6 +1559,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1754,6 +1766,7 @@ mod tests {
         let mut offsets = [0u16; 4];
         let mut inputs = DetailInputs {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1836,6 +1849,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1891,6 +1905,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,
@@ -1944,6 +1959,7 @@ mod tests {
         let theme = Theme::default();
         let ctx = crate::ui::detail_modules::DetailContext {
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             repo: &repo,

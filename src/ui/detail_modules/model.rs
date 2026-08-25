@@ -22,45 +22,53 @@ impl DetailModule for Model {
     fn lines(&self, ctx: &DetailContext<'_>, width: u16) -> Vec<Line<'static>> {
         let w = width as usize;
         let dim = ctx.theme.dim_style();
-        let mut lines: Vec<Line<'static>> = Vec::new();
-
-        match ctx.model_running.as_deref() {
-            Some(model) => lines.push(Line::from(Span::styled(
-                crate::ui::text::truncate(model, w),
-                dim,
-            ))),
-            // Not an error state — an agent that is not running, or one on the
-            // agent's own default, is the common case. Say so rather than
-            // leaving a blank the reader has to interpret.
-            None => lines.push(Line::from(Span::styled("(agent default)".to_string(), dim))),
-        }
-
-        // A pin that has changed since the agent started cannot take effect
-        // until it respawns — a process's environment is fixed when it starts.
-        // Saying so is the difference between "this did nothing" and "this is
-        // queued", which is otherwise invisible and reads as a broken keypress.
-        if let Some(pending) = ctx.model_pending.as_deref() {
+        let push = |lines: &mut Vec<Line<'static>>, text: String| {
             lines.push(Line::from(Span::styled(
-                crate::ui::text::truncate(&format!("{pending} on next spawn"), w),
+                crate::ui::text::truncate(&text, w),
                 dim,
             )));
+        };
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        // Three states, not two. An agent that is not running has no current
+        // model to report, so its pin *is* the answer — writing "(agent
+        // default)" above "X on next spawn" describes a process that does not
+        // exist and a change that is not a change.
+        match (ctx.agent_live, ctx.model_running.as_deref()) {
+            // Not running: whatever it will start on, stated plainly.
+            (false, _) => push(
+                &mut lines,
+                ctx.model_pending
+                    .clone()
+                    .unwrap_or_else(|| "(agent default)".to_string()),
+            ),
+            // Running, on something nameable.
+            (true, Some(model)) => {
+                push(&mut lines, model.to_string());
+                if let Some(pending) = ctx.model_pending.as_deref() {
+                    push(&mut lines, format!("{pending} on next spawn"));
+                }
+            }
+            // Running on the agent's own default, which is a real answer.
+            (true, None) => {
+                push(&mut lines, "(agent default)".to_string());
+                if let Some(pending) = ctx.model_pending.as_deref() {
+                    push(&mut lines, format!("{pending} on next spawn"));
+                }
+            }
         }
 
-        // Only when it is true, and counted from what agents are actually
-        // running rather than from what they are pinned to. wsx exists to run
-        // many agents at once; this is the one case where that stops being
-        // free, because they queue on one server instead of running in
-        // parallel.
+        // Counted from what agents are actually running on rather than from
+        // what they are pinned to. wsx exists to run many agents at once; this
+        // is the one case where that stops being free, because they queue on
+        // one server instead of running in parallel.
         if ctx.endpoint_peers > 0 {
             let others = if ctx.endpoint_peers == 1 {
                 "1 other workspace".to_string()
             } else {
                 format!("{} other workspaces", ctx.endpoint_peers)
             };
-            lines.push(Line::from(Span::styled(
-                crate::ui::text::truncate(&format!("shared with {others}"), w),
-                dim,
-            )));
+            push(&mut lines, format!("shared with {others}"));
         }
 
         lines
@@ -85,51 +93,66 @@ mod tests {
         assert_eq!(Model.title(), "MODEL");
     }
 
-    /// Nothing running, or running on the agent's own default, is the common
-    /// case and must read as deliberate rather than as missing data.
+    /// A workspace that has never been attached has no current model. Its pin
+    /// is simply what it will start on, and saying "(agent default)" above
+    /// "X on next spawn" describes a process that does not exist and a change
+    /// that is not a change.
     #[test]
-    fn no_running_model_reads_as_the_agent_default() {
+    fn a_workspace_that_is_not_running_shows_what_it_will_start_on() {
+        let mut ctx = stub_context();
+        ctx.agent_live = false;
+        ctx.model_pending = Some("local-qwen".to_string());
+        assert_eq!(text_of(&Model.lines(&ctx, 40)), vec!["local-qwen"]);
+    }
+
+    #[test]
+    fn not_running_and_unpinned_reads_as_the_agent_default() {
         let ctx = stub_context();
         assert_eq!(text_of(&Model.lines(&ctx, 40)), vec!["(agent default)"]);
     }
 
-    /// The running model is a fact about the live process, so it leads.
     #[test]
-    fn the_running_model_is_shown_first() {
+    fn a_running_agent_leads_with_what_it_is_actually_on() {
         let mut ctx = stub_context();
+        ctx.agent_live = true;
         ctx.model_running = Some("qwen3.8-27b".to_string());
         assert_eq!(text_of(&Model.lines(&ctx, 40)), vec!["qwen3.8-27b"]);
     }
 
-    /// Changing a pin cannot touch a process that has already started. Without
-    /// this line the keypress looks like it did nothing at all.
+    /// Changing a pin cannot touch a process that has already started, so the
+    /// contrast is only meaningful while something is running.
     #[test]
-    fn a_pin_that_has_not_taken_effect_says_so() {
+    fn a_running_agent_shows_a_pin_that_has_not_taken_effect() {
         let mut ctx = stub_context();
-        ctx.model_running = Some("cloud".to_string());
+        ctx.agent_live = true;
+        ctx.model_running = Some("claude-opus".to_string());
         ctx.model_pending = Some("local-qwen".to_string());
         assert_eq!(
             text_of(&Model.lines(&ctx, 40)),
-            vec!["cloud", "local-qwen on next spawn"]
+            vec!["claude-opus", "local-qwen on next spawn"]
         );
     }
 
-    /// When the pin already matches what is running there is nothing pending,
-    /// and repeating it would be noise.
+    /// Running on the agent's own default is a real answer, and distinct from
+    /// not running at all — which is why liveness is carried separately.
     #[test]
-    fn nothing_pending_when_the_pin_already_matches() {
+    fn running_on_the_agent_default_still_reports_a_pending_pin() {
         let mut ctx = stub_context();
-        ctx.model_running = Some("qwen3.8-27b".to_string());
-        ctx.model_pending = None;
-        assert_eq!(text_of(&Model.lines(&ctx, 40)).len(), 1);
+        ctx.agent_live = true;
+        ctx.model_running = None;
+        ctx.model_pending = Some("local-qwen".to_string());
+        assert_eq!(
+            text_of(&Model.lines(&ctx, 40)),
+            vec!["(agent default)", "local-qwen on next spawn"]
+        );
     }
 
     #[test]
     fn contention_is_reported_only_when_it_exists() {
         let mut ctx = stub_context();
+        ctx.agent_live = true;
         ctx.model_running = Some("qwen3.8-27b".to_string());
-
-        assert_eq!(Model.lines(&ctx, 40).len(), 1, "no peers, no second line");
+        assert_eq!(Model.lines(&ctx, 40).len(), 1, "no peers, no extra line");
 
         ctx.endpoint_peers = 1;
         assert_eq!(
@@ -147,6 +170,7 @@ mod tests {
     #[test]
     fn every_line_is_truncated_to_the_column() {
         let mut ctx = stub_context();
+        ctx.agent_live = true;
         ctx.model_running = Some("a-very-long-model-name-that-will-not-fit".to_string());
         ctx.model_pending = Some("a-very-long-profile-name-either".to_string());
         ctx.endpoint_peers = 2;

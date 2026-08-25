@@ -226,6 +226,13 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                     .get(&ws.id)
                     .and_then(|instances| instances.iter().find(|i| i.is_primary))
                     .cloned();
+                // Liveness is carried separately because `model_running: None`
+                // means both "no agent" and "an agent on its own default", and
+                // those are different sentences to write on screen.
+                let agent_live = primary
+                    .as_ref()
+                    .map(|i| app.instance_is_running(i.id))
+                    .unwrap_or(false);
                 let model_running = primary.as_ref().and_then(|i| app.instance_running_model(i));
                 let running_endpoint = primary
                     .as_ref()
@@ -244,6 +251,7 @@ pub(super) fn draw_dashboard(f: &mut ratatui::Frame, app: &mut App, area: ratatu
                     .unwrap_or(0);
                 let mut inputs = crate::ui::dashboard::detail::DetailInputs {
                     model_running,
+                    agent_live,
                     model_pending,
                     endpoint_peers,
                     repo,

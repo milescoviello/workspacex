@@ -78,7 +78,20 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
             ));
         }
         match key {
-            "base_url" => profile.base_url = Some(value.to_string()),
+            "base_url" => {
+                // Checked here because the alternative is discovering it much
+                // later, as an opaque connection failure inside an agent that
+                // has already spawned. A value without a scheme cannot be
+                // anything but a mistake.
+                if !value.starts_with("http://") && !value.starts_with("https://") {
+                    return Err(format!(
+                        "base_url in profile '{}' must start with http:// or https://, got \
+                         '{value}'",
+                        profile.name
+                    ));
+                }
+                profile.base_url = Some(value.to_string());
+            }
             "model" => profile.model = Some(value.to_string()),
             "auth_token_env" => profile.auth_token_env = Some(value.to_string()),
             "max_context" => {
@@ -89,6 +102,14 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
                         profile.name
                     )
                 })?;
+                // Zero would be forwarded to the agent as its context limit,
+                // which is not a smaller window but an unusable one.
+                if n == 0 {
+                    return Err(format!(
+                        "max_context in profile '{}' must be greater than zero",
+                        profile.name
+                    ));
+                }
                 profile.max_context = Some(n);
             }
             other => {
@@ -371,6 +392,28 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("neither base_url nor model"), "{err}");
+    }
+
+    /// A base_url without a scheme cannot work, and the failure would
+    /// otherwise surface as an opaque connection error inside an agent that
+    /// has already spawned — long after the person who typed it has moved on.
+    #[test]
+    fn base_url_must_carry_a_scheme() {
+        for bad in ["not-a-url", "127.0.0.1:8091", "ftp://host/x"] {
+            let err = validate(&format!("p base_url={bad} model=m"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("http://"), "should name the fix: {err}");
+        }
+        assert!(validate("p base_url=http://127.0.0.1:8091 model=m").is_ok());
+        assert!(validate("p base_url=https://api.example.com model=m").is_ok());
+    }
+
+    /// Zero is not a smaller context window, it is an unusable one.
+    #[test]
+    fn max_context_must_be_positive() {
+        let err = validate("p model=m max_context=0").unwrap_err().to_string();
+        assert!(err.contains("greater than zero"), "{err}");
     }
 
     #[test]

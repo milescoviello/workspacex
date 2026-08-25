@@ -41,6 +41,13 @@ pub struct DetailContext<'a> {
     /// `SessionManager::get` hands back by value, and the detail bar renders
     /// one workspace per draw, so this is a single small clone.
     pub model_running: Option<String>,
+    /// Whether the primary agent is running at all.
+    ///
+    /// Without this, `model_running: None` is ambiguous — it means both "no
+    /// agent" and "an agent on its own default", which are different sentences.
+    /// Conflating them made a workspace that had never started claim to be on
+    /// the agent default and to be switching away from it.
+    pub agent_live: bool,
     /// What the primary agent **will** use on its next spawn, when that differs
     /// from what it is running. `None` when they agree — the common case, where
     /// showing both would be noise.
@@ -177,6 +184,7 @@ pub(crate) mod tests_helpers {
             ago_secs: None,
             events_scanned: false,
             model_running: None,
+            agent_live: false,
             model_pending: None,
             endpoint_peers: 0,
             theme,
