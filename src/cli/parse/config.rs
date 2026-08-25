@@ -24,6 +24,7 @@ pub(in crate::cli) fn known_setting_key(k: &str) -> bool {
             | "pinned_commands"
             | "remotes"
             | "shared_hosts"
+            | "model_profiles"
             | "dashboard_branch_width"
             | "dashboard_pr_width"
             | "dashboard_sort_mode"

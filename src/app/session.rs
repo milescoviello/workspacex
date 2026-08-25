@@ -119,10 +119,7 @@ pub(crate) fn ensure_workspace_session(
         // Pinned model comes off the instance row, not the ambient environment:
         // this is the TUI process, which cannot see the environment of whatever
         // `wsx workspace create` made the workspace.
-        let selection = crate::pty::ModelSelection {
-            model: instance.model.clone(),
-            provider: instance.provider.clone(),
-        };
+        let selection = crate::commands::model_profiles::selection_for(&app.store, &instance)?;
         match app.sessions.spawn(
             inst,
             id,
@@ -197,10 +194,7 @@ pub(crate) fn ensure_instance_session(
         maybe_mirror_mcp(app, &repo_path, &path);
         let remote = crate::agent::remote_control::RemoteOpts::from_store(&app.store);
         let tmux = tmux_name_for(app, ws_id, &instance);
-        let selection = crate::pty::ModelSelection {
-            model: instance.model.clone(),
-            provider: instance.provider.clone(),
-        };
+        let selection = crate::commands::model_profiles::selection_for(&app.store, &instance)?;
         match app.sessions.spawn(
             inst,
             ws_id,

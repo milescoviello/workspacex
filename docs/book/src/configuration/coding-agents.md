@@ -9,7 +9,7 @@ Supported agents:
 
 | Agent              | CLI option       | Source                                                                    | Config                                    |
 | ------------------ | ---------------- | ------------------------------------------------------------------------- | ----------------------------------------- |
-| `claude` (default) | `--agent claude` | `claude` binary (override via `WSX_CLAUDE_BIN`)                           | Environment + `~/.claude.json` MCP        |
+| `claude` (default) | `--agent claude` | `claude` binary (override via `WSX_CLAUDE_BIN`)                           | `WSX_CLAUDE_MODEL`, [model profiles](model-profiles.md), `~/.claude.json` MCP |
 | `pi`               | `--agent pi`     | `pi` binary, [`@earendil-works/pi-coding-agent`](https://github.com/badlogic/pi-mono) (override via `WSX_PI_BIN`) | `~/.pi/`                 |
 | `hermes`           | `--agent hermes` | [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent) | `~/.hermes/config.yaml` (provider, model) |
 | `codex`            | `--agent codex`  | `codex` binary (override via `WSX_CODEX_BIN`)                             | `~/.codex/config.toml`                    |
@@ -33,8 +33,9 @@ workspace would come up on whatever the TUI itself was launched with.
 
 Resolution order at spawn, highest first:
 
-1. the model/provider recorded on the agent row at creation time,
-2. `WSX_<AGENT>_MODEL` / `WSX_<AGENT>_PROVIDER` in the environment of the process that
+1. the [model profile](model-profiles.md) the agent instance is pinned to,
+2. the model/provider recorded on the agent row at creation time,
+3. `WSX_<AGENT>_MODEL` / `WSX_<AGENT>_PROVIDER` in the environment of the process that
    spawns the agent — normally the TUI.
 
 So an exported variable still applies to every workspace that has no recorded choice of

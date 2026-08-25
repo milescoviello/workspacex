@@ -1,0 +1,79 @@
+A **model profile** is a named endpoint plus a model, so a workspace can be
+pointed at a particular server rather than at whatever the machine happens to
+default to. It is what makes a local model — llama.cpp, ollama, vLLM — usable
+from wsx, and it works for a hosted endpoint in exactly the same way, because
+to wsx they differ only by a URL.
+
+## Defining profiles
+
+Profiles live in the `model_profiles` setting, one per line: a name, then
+`key=value` fields.
+
+```bash
+wsx config edit model_profiles
+```
+
+```text
+# a llama.cpp server on this machine
+local-qwen  base_url=http://127.0.0.1:8091 model=qwen3.8-27b max_context=212992
+
+# the same model on the box with the spare GPU
+gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GPU_TOKEN
+```
+
+| Field | Meaning |
+| --- | --- |
+| `base_url` | API endpoint the agent should talk to |
+| `model` | Model name to request |
+| `auth_token_env` | **Name** of an environment variable holding the token |
+| `max_context` | Context window to advertise, when it differs from the model's default |
+
+A profile must set at least one of `base_url` or `model`, or it would do
+nothing. Blank lines and `#` comments are ignored.
+
+## Tokens are referenced, never stored
+
+`auth_token_env` holds the *name* of an environment variable, and the token is
+read from that variable at spawn time. Writing a literal token into a field is
+refused:
+
+```console
+$ wsx config set model_profiles 'x base_url=http://h api_key=sk-live-…'
+line 1: profile 'x' sets 'api_key' — store the NAME of an environment
+variable in auth_token_env instead, never the token itself
+```
+
+`state.db` is an ordinary unencrypted file that gets backed up and copied along
+with a home directory. A token written into it would be a credential at rest
+that nothing knows how to rotate.
+
+A variable that is unset is not an error — a local server usually wants no token
+at all, so the agent simply spawns without one.
+
+## How a selection is resolved
+
+At spawn, highest first:
+
+1. the profile named on the agent instance,
+2. the model/provider recorded on the instance when the workspace was created,
+3. `WSX_<AGENT>_MODEL` / `WSX_<AGENT>_PROVIDER` in the spawning process's
+   environment.
+
+A profile outranks a recorded model because it is the more deliberate choice: it
+names an endpoint someone configured, where the recorded value is whatever
+happened to be exported in the shell that created the workspace. A profile that
+sets `base_url` but no `model` still defers to the recorded model — "same model,
+different machine" is a normal thing to want.
+
+Profiles are stored **by name**, so editing one updates every workspace pinned
+to it. A name that no longer resolves is not fatal: the workspace opens on
+ambient defaults with a warning, rather than becoming unopenable because of an
+unrelated config edit.
+
+## Parallel agents share one GPU
+
+wsx is built to run many agents at once, and a local endpoint is the one case
+where that stops being free. Several workspaces pointed at the same local server
+do not run in parallel — they queue on one GPU and divide its context budget
+between them. Two local workspaces and a third on a hosted endpoint will often
+finish sooner than three local ones.

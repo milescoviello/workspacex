@@ -718,7 +718,7 @@ pub fn spawn_session(
     selection: &crate::pty::ModelSelection,
 ) -> Result<Session> {
     let mut child_cmd = match agent {
-        AgentKind::Claude => build_claude_command(cwd, &mode, remote),
+        AgentKind::Claude => build_claude_command(cwd, &mode, remote, selection),
         AgentKind::Pi => build_pi_command(cwd, &mode, remote, selection),
         AgentKind::Hermes => {
             prepare_hermes_workspace(cwd, &mode);

@@ -184,6 +184,15 @@ impl Store {
             self.add_column_if_missing("workspace_agents", "provider", "provider TEXT")?;
             self.conn().execute("PRAGMA user_version = 24", [])?;
         }
+        if v < 24 {
+            // The *name* of a `model_profiles` entry, not its expanded fields.
+            // Storing the name means editing a profile updates every instance
+            // pinned to it, which is the entire point of naming one; copying
+            // the values in would freeze each workspace at the definition that
+            // existed when it was created.
+            self.add_column_if_missing("workspace_agents", "model_profile", "model_profile TEXT")?;
+            self.conn().execute("PRAGMA user_version = 24", [])?;
+        }
         Ok(())
     }
 

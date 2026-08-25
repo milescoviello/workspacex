@@ -7,6 +7,7 @@
 //! holds the ssh destinations for browsing shared workspaces on remote hosts.
 
 pub mod external;
+pub mod model_profiles;
 pub mod pinned;
 pub mod remotes;
 pub mod shared;

@@ -58,18 +58,14 @@ impl AgentKind {
         self.display_name()
     }
 
-    /// Environment variable that overrides this agent's model, if it has one.
-    ///
-    /// `claude` has no such variable today — it is the only one of the five
-    /// without a model override — so it answers `None` and a create-time
-    /// capture simply records nothing for it.
+    /// Environment variable that overrides this agent's model.
     ///
     /// The names live here rather than inline at each spawn site so the
     /// capture path (which reads them) and the builders (which fall back to
     /// them) cannot drift apart.
     pub fn model_env(self) -> Option<&'static str> {
         match self {
-            AgentKind::Claude => None,
+            AgentKind::Claude => Some("WSX_CLAUDE_MODEL"),
             AgentKind::Pi => Some("WSX_PI_MODEL"),
             AgentKind::Hermes => Some("WSX_HERMES_MODEL"),
             AgentKind::Codex => Some("WSX_CODEX_MODEL"),
