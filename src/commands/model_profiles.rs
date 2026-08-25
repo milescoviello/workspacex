@@ -52,6 +52,15 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
             "profile line must start with a name, got a key=value pair: {name}"
         ));
     }
+    // A leading dash makes the name unusable as a command argument — `wsx agent
+    // profile -x` reads it as a flag — so a profile that could be created and
+    // then not referred to is worse than one that is refused up front.
+    if name.starts_with('-') {
+        return Err(format!(
+            "profile name '{name}' cannot start with '-'; it would be read as a \
+             command-line flag"
+        ));
+    }
     let mut profile = ModelProfile {
         name,
         ..Default::default()
@@ -90,7 +99,16 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
                         profile.name
                     ));
                 }
-                profile.base_url = Some(value.to_string());
+                // Trailing slashes are stripped so the same server written two
+                // ways is one endpoint. Contention compares these strings, and
+                // `http://h:1` vs `http://h:1/` would otherwise look like two
+                // servers and under-report agents queuing on one.
+                //
+                // Deliberately not full URL normalisation — host case, default
+                // ports, localhost vs 127.0.0.1 are a rabbit hole needing a URL
+                // parser, and the trailing slash is the case people actually
+                // hit.
+                profile.base_url = Some(value.trim_end_matches('/').to_string());
             }
             "model" => profile.model = Some(value.to_string()),
             "auth_token_env" => profile.auth_token_env = Some(value.to_string()),
@@ -397,6 +415,35 @@ mod tests {
     /// A base_url without a scheme cannot work, and the failure would
     /// otherwise surface as an opaque connection error inside an agent that
     /// has already spawned — long after the person who typed it has moved on.
+    /// The same server written two ways has to be one endpoint, or two agents
+    /// queuing on one GPU each report that they are queuing on nothing.
+    /// A name that cannot be typed as an argument everywhere it is accepted is
+    /// worse than one that is refused: it can be created and then not referred
+    /// to.
+    #[test]
+    fn profile_names_cannot_start_with_a_dash() {
+        let err = validate("-x base_url=http://h:1 model=m")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot start with"), "{err}");
+        assert!(err.contains("flag"), "should say why: {err}");
+        assert!(parse("-x base_url=http://h:1 model=m").is_empty());
+        assert!(validate("x base_url=http://h:1 model=m").is_ok());
+    }
+
+    #[test]
+    fn base_url_trailing_slashes_are_normalised_away() {
+        let p = parse("a base_url=http://127.0.0.1:8091/ model=m");
+        assert_eq!(p[0].base_url.as_deref(), Some("http://127.0.0.1:8091"));
+        let p = parse("a base_url=http://127.0.0.1:8091/// model=m");
+        assert_eq!(p[0].base_url.as_deref(), Some("http://127.0.0.1:8091"));
+
+        // Two profiles naming one server compare equal, which is what the
+        // contention count relies on.
+        let both = parse("a base_url=http://h:1 model=m\nb base_url=http://h:1/ model=m");
+        assert_eq!(both[0].base_url, both[1].base_url);
+    }
+
     #[test]
     fn base_url_must_carry_a_scheme() {
         for bad in ["not-a-url", "127.0.0.1:8091", "ftp://host/x"] {
