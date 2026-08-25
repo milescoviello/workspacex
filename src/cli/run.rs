@@ -473,6 +473,12 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 created.workspace.name,
                 created.workspace.worktree_path.display()
             );
+            if let Err(e) = capture_model_env(&store, created.workspace.id, agent_kind) {
+                // The worktree exists; a lost model pin is not worth aborting
+                // over, but it must not pass silently either — the agent would
+                // come up on a different model than the caller asked for.
+                eprintln!("warning: could not record the model for this workspace: {e}");
+            }
             if let Some(p) = &parent {
                 let mut inherited: Vec<String> = Vec::new();
                 if effective_yolo && !yolo {
@@ -804,4 +810,37 @@ fn waybar_linux_only() -> Error {
 #[cfg(not(target_os = "macos"))]
 fn menubar_macos_only() -> Error {
     Error::UserInput("wsx menubar is only available on macOS (SwiftBar integration)".into())
+}
+
+/// Record the creating process's `WSX_*_MODEL` / `WSX_*_PROVIDER` onto the new
+/// workspace's primary agent row.
+///
+/// Without this the variables are simply lost. `workspace create` returns
+/// without spawning anything — it only queues the starter prompt — and the
+/// agent is started later by the TUI, which sees its own environment and not
+/// this process's. Capturing here is what makes the documented
+/// `WSX_HERMES_MODEL=… wsx workspace create …` form actually reach the agent.
+///
+/// Deliberately *not* done on the TUI's own create path. There the creating and
+/// spawning processes are the same, so nothing is lost by leaving the value
+/// ambient — and pinning it would stop an exported variable from applying to
+/// existing workspaces after a relaunch, which is precisely what someone who
+/// exported it process-wide expects it to do.
+pub(super) fn capture_model_env(
+    store: &crate::data::store::Store,
+    ws_id: crate::data::store::WorkspaceId,
+    agent: crate::pty::AgentKind,
+) -> Result<()> {
+    let model = agent.model_env().and_then(|v| std::env::var(v).ok());
+    let provider = agent.provider_env().and_then(|v| std::env::var(v).ok());
+    if model.is_none() && provider.is_none() {
+        return Ok(());
+    }
+    // A workspace is born with a primary instance, so this is present in
+    // practice; treat its absence as "nothing to pin" rather than an error,
+    // since the caller has a live worktree either way.
+    let Some(target) = store.primary_instance_id(ws_id)? else {
+        return Ok(());
+    };
+    store.set_instance_model(target, model.as_deref(), provider.as_deref())
 }
