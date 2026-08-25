@@ -1979,3 +1979,60 @@ fn agent_profile_needs_a_name_or_an_explicit_clear() {
     let err = parse(&["agent", "profile"]).unwrap_err();
     assert!(err.to_string().contains("--clear"), "got: {err}");
 }
+
+/// wsx's own doctrine tells an agent to hand independent work to a new
+/// workspace, so a child created from inside one inherits its model the same
+/// way it inherits yolo and the agent kind. Without this an agent deliberately
+/// pinned to a local endpoint spawns children that quietly go elsewhere — and
+/// cost money.
+#[test]
+fn a_child_workspace_inherits_the_parents_model_profile() {
+    use crate::cli::run::inherited_model_profile;
+    use crate::data::store::{NewWorkspace, Store};
+    use crate::pty::AgentKind;
+
+    let store = Store::open_in_memory().unwrap();
+    store
+        .set_setting("model_profiles", "local base_url=http://127.0.0.1:8091")
+        .unwrap();
+    let repo = store
+        .add_repo(std::path::Path::new("/tmp/i"), "i", "wsx")
+        .unwrap();
+    let mk = |name: &str| {
+        store
+            .insert_workspace(&NewWorkspace {
+                repo_id: repo,
+                name,
+                branch: name,
+                worktree_path: &std::path::PathBuf::from(format!("/tmp/i/{name}")),
+                yolo: false,
+                agent: AgentKind::Claude,
+                shared: false,
+            })
+            .unwrap()
+    };
+
+    let parent = mk("parent");
+    let inst = store
+        .add_primary_agent(parent, AgentKind::Claude, 1)
+        .unwrap();
+    let parent_ws = store.workspace_by_id(parent).unwrap().unwrap();
+
+    // Nothing pinned yet: nothing to inherit.
+    assert_eq!(inherited_model_profile(&store, &parent_ws), None);
+
+    store
+        .set_instance_model_profile(inst.id, Some("local"))
+        .unwrap();
+    assert_eq!(
+        inherited_model_profile(&store, &parent_ws).as_deref(),
+        Some("local")
+    );
+
+    // A pin whose profile has since been deleted is not worth propagating:
+    // that would spread a dangling reference to every child.
+    store
+        .set_setting("model_profiles", "something-else model=m")
+        .unwrap();
+    assert_eq!(inherited_model_profile(&store, &parent_ws), None);
+}

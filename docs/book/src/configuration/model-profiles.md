@@ -90,6 +90,27 @@ On `create` that check runs before the worktree exists, so a typo costs nothing.
 Clearing must be spelled `--clear`, so a half-typed command cannot silently
 unpin a workspace.
 
+## Child workspaces inherit the model
+
+A workspace created from *inside* another one inherits its model, the same way
+it already inherits yolo mode and the agent kind:
+
+```console
+$ wsx workspace create backend --name follow-up
+created workspace backend/follow-up at …
+pinned to model profile local-qwen
+inherited yolo, model=local-qwen from backend/add-widgets
+```
+
+This matters because wsx's own agent doctrine instructs an agent to hand
+independent work to a new workspace. Without inheritance, an agent deliberately
+pinned to a local endpoint would spawn children that quietly went somewhere
+else — and cost money.
+
+An explicit `--profile` overrides it, and a pin whose profile has since been
+deleted is not propagated: spreading a dangling reference to every child is
+worse than starting them on the default.
+
 ## Changing the model of a *running* agent
 
 You cannot. A process's environment is fixed when it starts, so a pin applies at

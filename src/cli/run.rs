@@ -483,6 +483,19 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             let default_agent = crate::pty::session::AgentKind::from_store(&store);
             let (effective_yolo, agent_kind) =
                 effective_create_flags(yolo, agent.as_deref(), parent.as_ref(), default_agent);
+            // The model is inherited from the surrounding workspace for the
+            // same reason yolo and the agent kind are: wsx's own doctrine tells
+            // an agent to hand independent work to a new workspace, and an
+            // agent deliberately pinned to a local endpoint would otherwise
+            // spawn children that quietly go somewhere else — and cost money.
+            // An explicit `--profile` still wins.
+            let inherited_profile = match profile.as_deref() {
+                Some(_) => None,
+                None => parent
+                    .as_ref()
+                    .and_then(|p| inherited_model_profile(&store, p)),
+            };
+            let profile = profile.or_else(|| inherited_profile.clone());
             let created = crate::data::workspace::create(
                 &store,
                 &r,
@@ -528,6 +541,9 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 }
                 if agent.is_none() && p.agent != default_agent {
                     inherited.push(format!("agent={}", p.agent.display_name()));
+                }
+                if let Some(name) = inherited_profile.as_deref() {
+                    inherited.push(format!("model={name}"));
                 }
                 if !inherited.is_empty() {
                     let parent_repo = crate::data::repo::list(&store)?
@@ -980,5 +996,28 @@ fn when_applies(ws: &crate::data::store::Workspace) -> &'static str {
         "applies when this workspace's tmux session is restarted, not on re-attach"
     } else {
         "applies on next spawn"
+    }
+}
+
+/// The model profile a new workspace should inherit from the one it was created
+/// inside, if any.
+///
+/// Only a name that still resolves is inherited: carrying a stale pin forward
+/// would spread a dangling reference from one workspace to every child it
+/// creates, and a profile the parent can no longer use is not a choice worth
+/// propagating.
+pub(super) fn inherited_model_profile(
+    store: &crate::data::store::Store,
+    parent: &crate::data::store::Workspace,
+) -> Option<String> {
+    let target = store.primary_instance_id(parent.id).ok().flatten()?;
+    let name = store
+        .workspace_agents_by_id(target)
+        .ok()
+        .flatten()?
+        .model_profile?;
+    match crate::commands::model_profiles::lookup(store, &name) {
+        Ok(Some(_)) => Some(name),
+        _ => None,
     }
 }
