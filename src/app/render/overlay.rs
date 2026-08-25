@@ -97,7 +97,7 @@ pub(super) fn draw_modal(f: &mut ratatui::Frame, app: &mut App, area: ratatui::l
             workspace_id,
             selected,
         } => {
-            let agents: Vec<(crate::data::agents::AgentInstance, bool, Option<String>)> = app
+            let agents: Vec<crate::ui::modal::AgentRow> = app
                 .store
                 .workspace_agents(*workspace_id)
                 .unwrap_or_default()
@@ -105,10 +105,19 @@ pub(super) fn draw_modal(f: &mut ratatui::Frame, app: &mut App, area: ratatui::l
                 .map(|inst| {
                     let live = app.instance_is_running(inst.id);
                     let running = app.instance_running_model(&inst);
-                    (inst, live, running)
+                    // Same computation the detail bar uses, so the two surfaces
+                    // cannot disagree about whether something is queued.
+                    let pending = app.pending_model(&inst);
+                    (inst, live, running, pending)
                 })
                 .collect();
-            crate::ui::modal::render_agents_panel(f, area, &agents, *selected, &app.theme);
+            let shared = app
+                .workspaces
+                .iter()
+                .find(|(_, w)| w.id == *workspace_id)
+                .map(|(_, w)| w.shared)
+                .unwrap_or(false);
+            crate::ui::modal::render_agents_panel(f, area, &agents, shared, *selected, &app.theme);
         }
         crate::ui::modal::Modal::UsageWindowPicker { .. } => {
             // Rendered separately below, anchored to the footer graph.

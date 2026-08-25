@@ -18,7 +18,7 @@ mod updates_panel;
 mod usage_picker;
 
 // Panel renderers called from app::render via `crate::ui::modal::*`.
-pub use agents_panel::render_agents_panel;
+pub use agents_panel::{AgentRow, render_agents_panel};
 pub use name_color_picker::{Dir, move_selection, render_name_color_picker};
 pub use process_list::render_process_list;
 pub use remote_workspace_list::render_remote_workspace_list;
