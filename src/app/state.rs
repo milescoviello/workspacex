@@ -286,7 +286,8 @@ impl App {
     /// endpoint capability included, so this compares against what would
     /// actually happen rather than an approximation of it.
     pub fn pending_model(&self, inst: &crate::data::agents::AgentInstance) -> Option<String> {
-        let next = crate::commands::model_profiles::selection_for(&self.store, inst).ok()?;
+        // The cached list, not the store: this runs per agent per frame.
+        let next = crate::commands::model_profiles::selection_for(&self.model_profiles, inst);
         let next_model = inst
             .agent
             .model_env()

@@ -206,6 +206,12 @@ pub fn lookup(store: &Store, name: &str) -> Result<Option<ModelProfile>> {
 
 /// Resolve what an agent instance should spawn with.
 ///
+/// Takes already-parsed profiles rather than a `Store` because the render path
+/// calls this per agent, per frame: reading and re-parsing the `model_profiles`
+/// blob there would put a SQLite query and a full parse inside a draw loop the
+/// rest of this module is careful to keep free of both. Callers pass the
+/// cached `App::model_profiles`; the spawn path, which runs once, lists fresh.
+///
 /// Precedence, highest first: the named profile, then the model/provider
 /// captured on the row at creation time, then nothing — in which case the
 /// per-agent builders fall back to `WSX_*_MODEL` in the spawning process's
@@ -222,13 +228,13 @@ pub fn lookup(store: &Store, name: &str) -> Result<Option<ModelProfile>> {
 /// still open — on ambient defaults, with a warning — rather than becoming
 /// unopenable because of a config edit.
 pub fn selection_for(
-    store: &Store,
+    profiles: &[ModelProfile],
     instance: &crate::data::agents::AgentInstance,
-) -> Result<crate::pty::ModelSelection> {
+) -> crate::pty::ModelSelection {
     let named = instance.model_profile.as_deref();
     let profile = match named {
         Some(name) => {
-            let found = lookup(store, name)?;
+            let found = profiles.iter().find(|p| p.name == name).cloned();
             if found.is_none() {
                 tracing::warn!(
                     profile = name,
@@ -240,7 +246,7 @@ pub fn selection_for(
         }
         None => None,
     };
-    Ok(match profile {
+    match profile {
         Some(p) => crate::pty::ModelSelection {
             model: p.model.or_else(|| instance.model.clone()),
             provider: instance.provider.clone(),
@@ -253,7 +259,7 @@ pub fn selection_for(
             provider: instance.provider.clone(),
             ..Default::default()
         },
-    })
+    }
 }
 
 #[cfg(test)]
@@ -305,14 +311,14 @@ mod tests {
         store
             .set_instance_model(id, Some("from-row"), Some("prov"))
             .unwrap();
-        let sel = selection_for(&store, &instance(&store, id)).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
         assert_eq!(sel.model.as_deref(), Some("from-row"));
         assert_eq!(sel.provider.as_deref(), Some("prov"));
         assert_eq!(sel.base_url, None);
 
         // Pinned to a profile: the profile wins, and brings the endpoint.
         store.set_instance_model_profile(id, Some("local")).unwrap();
-        let sel = selection_for(&store, &instance(&store, id)).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
         assert_eq!(sel.model.as_deref(), Some("from-profile"));
         assert_eq!(sel.base_url.as_deref(), Some("http://127.0.0.1:8091"));
     }
@@ -328,7 +334,7 @@ mod tests {
         store
             .set_instance_model_profile(id, Some("endpoint-only"))
             .unwrap();
-        let sel = selection_for(&store, &instance(&store, id)).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
         assert_eq!(sel.model.as_deref(), Some("from-row"));
         assert_eq!(sel.base_url.as_deref(), Some("http://gpu-box.lan:8091"));
     }
@@ -345,7 +351,7 @@ mod tests {
         store
             .set_instance_model_profile(id, Some("deleted-since"))
             .unwrap();
-        let sel = selection_for(&store, &instance(&store, id)).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
         assert_eq!(sel.model.as_deref(), Some("from-row"));
         assert_eq!(sel.base_url, None);
     }
