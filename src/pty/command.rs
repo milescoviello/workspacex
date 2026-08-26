@@ -309,6 +309,21 @@ pub fn build_pi_command(
     // Suppress pi's startup npm chatter and update checks.
     cmd.env("PI_OFFLINE", "1");
     cmd.env("npm_config_loglevel", "error");
+    // pi reads `LLAMA_BASE_URL` ("llama.cpp server URL") from the environment
+    // and has no `--base-url` flag, so this is the one endpoint a profile can
+    // move per spawn. Its other providers take their URL from pi's own config,
+    // which wsx has no business rewriting.
+    //
+    // Set after the inherited environment above so a profile beats whatever the
+    // TUI itself was launched with, matching how claude's endpoint is applied.
+    if let Some(base_url) = &selection.base_url {
+        cmd.env("LLAMA_BASE_URL", base_url);
+    }
+    // No token is forwarded to pi. It reads no API-key environment variable —
+    // verified against 0.84.3, which has none — and its only mechanism is the
+    // `--api-key` flag, which would put the secret in the process list for any
+    // `ps` to read. A llama.cpp server on localhost normally wants no key
+    // anyway; anything that does should hold it in pi's own credential store.
 
     let (doctrine, rename_prompt, custom, add_continue) = match mode {
         SpawnMode::Continue {
@@ -675,6 +690,24 @@ pub fn build_codex_command(
 
     if yolo {
         cmd.arg("--dangerously-bypass-approvals-and-sandbox");
+    }
+
+    // A local model, by provider name rather than by URL. Codex cannot be given
+    // an arbitrary endpoint: a custom `model_providers` entry only accepts
+    // `wire_api = "responses"` (0.149.1 rejects "chat"), while local servers
+    // speak chat-completions — so a `base_url` would load and then fail to
+    // talk. `--oss --local-provider` is the path codex ships for this, and it
+    // is what a profile's `provider` selects.
+    //
+    // Fresh-only, like the `-c` overrides above: `codex resume --last` restores
+    // the session's stored provider and would fight a flag re-asserted here.
+    if !resume
+        && let Some(provider) = selection.provider_or_env("WSX_CODEX_PROVIDER")
+        && matches!(provider.as_str(), "ollama" | "lmstudio")
+    {
+        cmd.arg("--oss");
+        cmd.arg("--local-provider");
+        cmd.arg(&provider);
     }
 
     let model = selection.model_or_env("WSX_CODEX_MODEL");
@@ -1318,28 +1351,6 @@ mod tests {
             .map(|s| s.to_string_lossy().to_string())
             .collect();
         assert!(!args.iter().any(|a| a == "--add-dir"), "got: {args:?}");
-    }
-
-    /// Only claude is wired to an arbitrary endpoint. Recording one for an
-    /// agent that never used it would make the dashboard claim a workspace is
-    /// on a local server when its agent went somewhere else entirely — and the
-    /// contention count is derived from exactly that value.
-    #[test]
-    fn only_claude_can_be_pointed_at_an_endpoint() {
-        use crate::pty::AgentKind;
-        assert!(AgentKind::Claude.supports_endpoint());
-        for other in [
-            AgentKind::Pi,
-            AgentKind::Hermes,
-            AgentKind::Codex,
-            AgentKind::Omp,
-        ] {
-            assert!(
-                !other.supports_endpoint(),
-                "{} claims endpoint support it does not have",
-                other.display_name()
-            );
-        }
     }
 
     /// Pointing an agent at a local model server is the whole reason profiles

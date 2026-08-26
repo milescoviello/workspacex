@@ -27,6 +27,11 @@ pub struct ModelProfile {
     pub model: Option<String>,
     /// Name of an environment variable holding the token — never the token.
     pub auth_token_env: Option<String>,
+    /// A named provider, for agents that reach a local server by name rather
+    /// than by URL. `codex` is the case: it cannot be given an arbitrary
+    /// `base_url` (custom providers only speak the Responses API) but ships
+    /// `--oss --local-provider ollama|lmstudio`.
+    pub provider: Option<String>,
     pub max_context: Option<u64>,
 }
 
@@ -35,7 +40,18 @@ pub struct ModelProfile {
 /// that look ordinary and reject models whose names happen to look secret.
 const CREDENTIAL_KEYS: &[&str] = &["auth_token", "token", "api_key", "apikey", "password"];
 
-const KNOWN_KEYS: &[&str] = &["base_url", "model", "auth_token_env", "max_context"];
+const KNOWN_KEYS: &[&str] = &[
+    "base_url",
+    "model",
+    "provider",
+    "auth_token_env",
+    "max_context",
+];
+
+/// Providers an agent can be pointed at by name. Kept to what a shipped agent
+/// actually implements — codex takes exactly these two — rather than accepting
+/// any string and failing later inside the agent.
+const KNOWN_PROVIDERS: &[&str] = &["ollama", "lmstudio"];
 
 /// Parse one line. `Ok(None)` is a line with nothing in it (blank or comment);
 /// `Err` carries a message naming what is wrong with it.
@@ -111,6 +127,16 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
                 profile.base_url = Some(value.trim_end_matches('/').to_string());
             }
             "model" => profile.model = Some(value.to_string()),
+            "provider" => {
+                if !KNOWN_PROVIDERS.contains(&value) {
+                    return Err(format!(
+                        "provider in profile '{}' must be one of {}, got '{value}'",
+                        profile.name,
+                        KNOWN_PROVIDERS.join(", ")
+                    ));
+                }
+                profile.provider = Some(value.to_string());
+            }
             "auth_token_env" => profile.auth_token_env = Some(value.to_string()),
             "max_context" => {
                 let n = value.parse::<u64>().map_err(|_| {
@@ -139,9 +165,9 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
             }
         }
     }
-    if profile.base_url.is_none() && profile.model.is_none() {
+    if profile.base_url.is_none() && profile.model.is_none() && profile.provider.is_none() {
         return Err(format!(
-            "profile '{}' sets neither base_url nor model, so it would do nothing",
+            "profile '{}' sets none of base_url, model or provider, so it would do nothing",
             profile.name
         ));
     }
@@ -249,7 +275,10 @@ pub fn selection_for(
     match profile {
         Some(p) => crate::pty::ModelSelection {
             model: p.model.or_else(|| instance.model.clone()),
-            provider: instance.provider.clone(),
+            // The profile's provider wins for the same reason its model does:
+            // it is the deliberate choice, where the row's value is whatever
+            // happened to be exported when the workspace was created.
+            provider: p.provider.or_else(|| instance.provider.clone()),
             base_url: p.base_url,
             auth_token_env: p.auth_token_env,
             max_context: p.max_context,
@@ -415,7 +444,7 @@ mod tests {
         let err = validate("empty auth_token_env=TOK")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("neither base_url nor model"), "{err}");
+        assert!(err.contains("none of base_url, model or provider"), "{err}");
     }
 
     /// A base_url without a scheme cannot work, and the failure would
@@ -448,6 +477,43 @@ mod tests {
         // contention count relies on.
         let both = parse("a base_url=http://h:1 model=m\nb base_url=http://h:1/ model=m");
         assert_eq!(both[0].base_url, both[1].base_url);
+    }
+
+    /// `provider` is restricted to what a shipped agent actually implements.
+    /// Accepting any string would move the failure inside the agent, long after
+    /// the person who typed it could act on it.
+    #[test]
+    fn provider_is_restricted_to_providers_an_agent_implements() {
+        let p = parse("local provider=ollama model=qwen2.5:7b");
+        assert_eq!(p[0].provider.as_deref(), Some("ollama"));
+        assert!(validate("l provider=lmstudio model=m").is_ok());
+
+        let err = validate("l provider=vllm model=m").unwrap_err().to_string();
+        assert!(err.contains("vllm"), "{err}");
+        assert!(err.contains("ollama"), "should list what is allowed: {err}");
+    }
+
+    /// A profile naming only a provider is meaningful — it points codex at a
+    /// local server — so it must not be rejected as empty.
+    #[test]
+    fn a_provider_alone_is_a_usable_profile() {
+        assert!(validate("l provider=ollama").is_ok());
+        let err = validate("l auth_token_env=TOK").unwrap_err().to_string();
+        assert!(err.contains("none of base_url, model or provider"), "{err}");
+    }
+
+    /// The profile's provider outranks the row's, for the same reason its model
+    /// does: it is the deliberate choice.
+    #[test]
+    fn a_profile_provider_beats_the_captured_one() {
+        let (store, id) = seed("local provider=ollama model=qwen2.5:7b");
+        store
+            .set_instance_model(id, Some("old"), Some("captured"))
+            .unwrap();
+        store.set_instance_model_profile(id, Some("local")).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
+        assert_eq!(sel.provider.as_deref(), Some("ollama"));
+        assert_eq!(sel.model.as_deref(), Some("qwen2.5:7b"));
     }
 
     #[test]

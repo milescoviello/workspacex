@@ -25,6 +25,7 @@ gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GP
 | --- | --- |
 | `base_url` | API endpoint the agent should talk to. Must start with `http://` or `https://` |
 | `model` | Model name to request |
+| `provider` | Named local provider for agents pointed by name rather than URL: `ollama` or `lmstudio` |
 | `auth_token_env` | **Name** of an environment variable holding the token |
 | `max_context` | Context window to advertise, when it differs from the model's default. Must be greater than zero |
 
@@ -38,27 +39,46 @@ agent, long after the person who typed it has moved on.
 
 ## Which agents can use which fields
 
-| Agent | `model` | `base_url` / `auth_token_env` / `max_context` |
-| --- | --- | --- |
-| `claude` | yes | **yes** |
-| `pi`, `hermes`, `codex`, `omp` | yes | no |
+These five do not point at an endpoint the same way, and the differences decide
+what a profile can promise. Each row was established by reading the tool.
 
-Only Claude Code is wired to an arbitrary endpoint. The others accept a
-profile's `model` but reach their endpoint through their own configuration, by
-mechanisms wsx does not model — so pinning one of them to a profile that sets
-`base_url` applies the model and nothing else.
+| Agent | `model` | endpoint | how |
+| --- | --- | --- | --- |
+| `claude` | yes | **`base_url`** | `ANTHROPIC_BASE_URL` in the environment |
+| `pi` | yes | **`base_url`** | `LLAMA_BASE_URL` — llama.cpp servers |
+| `codex` | yes | **`provider`** | `--oss --local-provider ollama\|lmstudio` |
+| `hermes` | yes | no | its `config.yaml` beats anything wsx can set |
+| `omp` | yes | no | custom providers live in `~/.omp/agent/models.yml` |
 
-That is allowed, because pinning a profile for its model alone is reasonable.
-It is not silent: the CLI warns when you pin it, and wsx records no endpoint for
-that session, so the dashboard never claims the workspace is on a server its
-agent never contacted.
+**Codex takes a provider name, not a URL.** A custom `model_providers` entry in
+codex only accepts `wire_api = "responses"` — 0.149.1 rejects `"chat"` — while
+local servers speak chat-completions, so a URL would load and then fail to talk.
+Codex ships `--oss --local-provider` for exactly this case, and a profile's
+`provider` field selects it:
+
+```text
+local-ollama  provider=ollama model=qwen2.5:7b
+```
+
+**Hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint as
+`argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins over
+anything wsx can set and there is no flag; omp reads custom providers only from
+its own `models.yml`. Both already reach any model through their own
+configuration, which is why this is a limitation rather than a gap.
+
+None of it is silent. The CLI warns when a profile carries an endpoint the
+chosen agent cannot use, and wsx records no endpoint for that session — so the
+dashboard never claims a workspace is on a server its agent never contacted.
 
 ```console
 $ wsx workspace create backend --agent codex --profile local-qwen
 pinned to model profile local-qwen
-warning: profile 'local-qwen' sets base_url, but codex reaches its endpoint
-through its own config — only the model will be applied
+warning: profile 'local-qwen' sets base_url, but codex cannot be given an
+arbitrary endpoint — set `provider=ollama` or `provider=lmstudio` instead
 ```
+
+No token is forwarded to `pi`: it reads no API-key environment variable, and its
+only mechanism is `--api-key`, which would put the secret in the process list.
 
 ## Choosing a profile
 

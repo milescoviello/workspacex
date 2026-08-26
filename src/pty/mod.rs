@@ -8,6 +8,6 @@ mod session_detect;
 pub mod tmux;
 pub mod wake;
 mod workspace_prep;
-pub use agent_kind::AgentKind;
+pub use agent_kind::{AgentKind, EndpointSupport};
 pub use command::ModelSelection;
 pub use session::{Session, SessionManager, SessionStatus};

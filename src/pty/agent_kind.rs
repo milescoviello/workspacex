@@ -18,6 +18,18 @@ pub enum AgentKind {
     Omp,
 }
 
+/// How an agent can be pointed at a non-default endpoint for one spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointSupport {
+    /// An arbitrary URL, passed through the environment.
+    BaseUrl,
+    /// Not an arbitrary URL — only a named local provider the agent already
+    /// knows how to speak to (`ollama`, `lmstudio`).
+    LocalProvider,
+    /// Nothing wsx can set per spawn; the agent's own config decides.
+    None,
+}
+
 impl AgentKind {
     /// All agent kinds, in stable display order. Add new variants here when
     /// extending the enum — `const` arrays do not get exhaustiveness checking,
@@ -73,17 +85,40 @@ impl AgentKind {
         }
     }
 
-    /// Whether this agent can be pointed at an arbitrary endpoint by a model
-    /// profile — that is, whether `base_url` / `auth_token_env` /
-    /// `max_context` mean anything for it.
+    /// How — if at all — this agent can be pointed somewhere other than its
+    /// default endpoint for a single spawn.
     ///
-    /// Only `claude` today. The others take a profile's `model` but reach
-    /// their endpoint through their own config, by mechanisms this crate does
-    /// not model. Saying so explicitly is what stops a profile with a
-    /// `base_url` from being pinned to them and silently doing half of what it
-    /// looks like it does.
+    /// Established by reading each tool rather than assuming they are alike;
+    /// they are not, and the differences decide what a profile can promise:
+    ///
+    /// - **claude** takes `ANTHROPIC_BASE_URL` from the environment, so any URL
+    ///   works.
+    /// - **pi** takes `LLAMA_BASE_URL` ("llama.cpp server URL"), so any
+    ///   llama.cpp-compatible URL works. It has no `--base-url` flag; its other
+    ///   providers get their URL from its own config.
+    /// - **codex** cannot be given an arbitrary URL: a custom `model_providers`
+    ///   entry only accepts `wire_api = "responses"` (0.149.1 rejects "chat"),
+    ///   and local servers speak chat-completions. It ships `--oss
+    ///   --local-provider ollama|lmstudio` for exactly this, so it is reachable
+    ///   by *provider name* instead.
+    /// - **hermes** resolves `base_url` as `arg or config.yaml or
+    ///   OPENROUTER_BASE_URL` — the config file beats the environment and there
+    ///   is no flag, so nothing wsx can set per spawn will move it.
+    /// - **omp** takes custom providers only from `~/.omp/agent/models.yml`.
+    ///
+    /// Saying this explicitly is what stops a profile from being pinned to an
+    /// agent that will quietly ignore half of it.
+    pub fn endpoint_support(self) -> EndpointSupport {
+        match self {
+            AgentKind::Claude | AgentKind::Pi => EndpointSupport::BaseUrl,
+            AgentKind::Codex => EndpointSupport::LocalProvider,
+            AgentKind::Hermes | AgentKind::Omp => EndpointSupport::None,
+        }
+    }
+
+    /// Whether a profile's `base_url` means anything for this agent.
     pub fn supports_endpoint(self) -> bool {
-        matches!(self, AgentKind::Claude)
+        !matches!(self.endpoint_support(), EndpointSupport::None)
     }
 
     /// Provider counterpart to [`Self::model_env`]. Only the agents that
@@ -99,5 +134,49 @@ impl AgentKind {
 
     pub fn from_store(store: &crate::data::store::Store) -> Self {
         Self::from_str_or_default(store.get_setting("coding_agent").ok().flatten().as_deref())
+    }
+}
+
+#[cfg(test)]
+mod endpoint_support_tests {
+    use super::*;
+
+    /// These are not alike, and pretending they are is how a profile ends up
+    /// silently doing half of what it says. Each value was established by
+    /// reading the tool, not by assuming:
+    ///
+    /// - claude takes `ANTHROPIC_BASE_URL`; pi takes `LLAMA_BASE_URL`.
+    /// - codex rejects `wire_api = "chat"` on a custom provider (0.149.1) and
+    ///   ships `--oss --local-provider` instead, so it is reachable by name.
+    /// - hermes resolves `arg or config.yaml or OPENROUTER_BASE_URL`, so its
+    ///   config file beats anything wsx can set.
+    /// - omp takes custom providers only from `~/.omp/agent/models.yml`.
+    #[test]
+    fn each_agent_reports_the_endpoint_mechanism_it_actually_has() {
+        assert_eq!(
+            AgentKind::Claude.endpoint_support(),
+            EndpointSupport::BaseUrl
+        );
+        assert_eq!(AgentKind::Pi.endpoint_support(), EndpointSupport::BaseUrl);
+        assert_eq!(
+            AgentKind::Codex.endpoint_support(),
+            EndpointSupport::LocalProvider
+        );
+        assert_eq!(AgentKind::Hermes.endpoint_support(), EndpointSupport::None);
+        assert_eq!(AgentKind::Omp.endpoint_support(), EndpointSupport::None);
+    }
+
+    /// `supports_endpoint` is the coarse question the warning paths ask, and it
+    /// must stay consistent with the detailed answer above.
+    #[test]
+    fn supports_endpoint_agrees_with_the_detailed_mechanism() {
+        for k in AgentKind::ALL {
+            assert_eq!(
+                k.supports_endpoint(),
+                k.endpoint_support() != EndpointSupport::None,
+                "{} disagrees with itself",
+                k.display_name()
+            );
+        }
     }
 }

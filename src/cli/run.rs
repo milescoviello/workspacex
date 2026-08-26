@@ -978,16 +978,39 @@ fn warn_if_endpoint_unusable(
     profile: &str,
     agent: crate::pty::AgentKind,
 ) {
-    if agent.supports_endpoint() {
+    let Ok(Some(p)) = crate::commands::model_profiles::lookup(store, profile) else {
         return;
-    }
-    if let Ok(Some(p)) = crate::commands::model_profiles::lookup(store, profile) {
-        if p.base_url.is_some() {
-            eprintln!(
-                "warning: profile '{profile}' sets base_url, but {} reaches its endpoint \
-                 through its own config — only the model will be applied",
-                agent.display_name()
-            );
+    };
+    match agent.endpoint_support() {
+        crate::pty::EndpointSupport::BaseUrl => {
+            if p.provider.is_some() {
+                eprintln!(
+                    "warning: profile '{profile}' sets provider, which only codex uses; \
+                     {} takes an endpoint by base_url instead",
+                    agent.display_name()
+                );
+            }
+        }
+        // Codex cannot take an arbitrary URL — a custom provider entry only
+        // speaks the Responses API, while local servers speak chat-completions
+        // — so it is reached by provider name instead.
+        crate::pty::EndpointSupport::LocalProvider => {
+            if p.base_url.is_some() && p.provider.is_none() {
+                eprintln!(
+                    "warning: profile '{profile}' sets base_url, but {} cannot be given an \
+                     arbitrary endpoint — set `provider=ollama` or `provider=lmstudio` instead",
+                    agent.display_name()
+                );
+            }
+        }
+        crate::pty::EndpointSupport::None => {
+            if p.base_url.is_some() || p.provider.is_some() {
+                eprintln!(
+                    "warning: profile '{profile}' sets an endpoint, but {} takes its endpoint \
+                     from its own config — only the model will be applied",
+                    agent.display_name()
+                );
+            }
         }
     }
 }

@@ -756,17 +756,23 @@ pub fn spawn_session(
     // Only claude is wired to an arbitrary endpoint. Recording one for an
     // agent that cannot use it would make the dashboard claim a workspace is on
     // a local server when its agent never went there.
-    let spawned_endpoint = if agent.supports_endpoint() {
-        selection.base_url.clone()
-    } else {
-        if selection.base_url.is_some() {
-            tracing::warn!(
-                agent = agent.display_name(),
-                "model profile sets base_url, but this agent reaches its endpoint through its \
-                 own config; only the model is being applied"
-            );
+    // Only an agent that was actually handed a URL records one. Codex reaches a
+    // local server by provider name instead, and recording a URL it never saw
+    // would make the dashboard claim a workspace is on a server its agent never
+    // contacted — which is what the contention count reads.
+    let spawned_endpoint = match agent.endpoint_support() {
+        crate::pty::EndpointSupport::BaseUrl => selection.base_url.clone(),
+        crate::pty::EndpointSupport::LocalProvider => None,
+        crate::pty::EndpointSupport::None => {
+            if selection.base_url.is_some() {
+                tracing::warn!(
+                    agent = agent.display_name(),
+                    "model profile sets base_url, but this agent takes its endpoint from its \
+                     own config; only the model is being applied"
+                );
+            }
+            None
         }
-        None
     };
     let mut session = spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)?;
     session.spawned_model = spawned_model;
