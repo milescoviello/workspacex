@@ -1100,6 +1100,24 @@ fn empty_body_distinguishes_no_repos_from_a_filter_that_hid_everything() {
     );
 }
 
+/// A filter typed on a dashboard with no repos must still say "no repos".
+///
+/// Nothing a filter does can hide rows that do not exist, so reporting that the
+/// filter hid something sends a first-time user to clear a filter when what
+/// they actually need is `wsx repo add` — the wrong instruction for precisely
+/// the person this message exists to help.
+#[test]
+fn no_repos_outranks_an_active_filter() {
+    let none: Vec<Repo> = Vec::new();
+    for group in [GroupMode::Repo, GroupMode::Attention] {
+        let body = render_empty_body(&none, group, Some("zzz"));
+        assert!(
+            body.contains("(no repos · run wsx repo add <path>)"),
+            "{group:?} with no repos must not blame the filter:\n{body}"
+        );
+    }
+}
+
 /// The remedy is only correct while there genuinely are no repos: a
 /// registered repo always draws something (its header, or a QUIET REPOS row),
 /// so the empty-body message must never appear alongside one.

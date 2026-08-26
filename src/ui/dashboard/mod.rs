@@ -301,10 +301,15 @@ pub fn render_without_footer(
     // REPOS, so `items` is empty only when there are no repos at all or a
     // filter hid every row.
     if items.is_empty() {
-        let msg = if state.filter.as_deref().filter(|f| !f.is_empty()).is_some() {
-            "(no matching workspaces)"
-        } else {
+        // No repos is checked first because it is the more fundamental fact:
+        // no filter can hide rows that do not exist, so a filter typed on an
+        // empty dashboard would otherwise report that the filter hid something
+        // — the wrong instruction for precisely the first-time user this
+        // message exists to help.
+        let msg = if inputs.repos.is_empty() {
             "(no repos · run wsx repo add <path>)"
+        } else {
+            "(no matching workspaces)"
         };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(msg.to_string(), theme.dim_style()))),
