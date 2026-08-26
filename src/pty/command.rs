@@ -325,13 +325,17 @@ pub fn build_pi_command(
     // Suppress pi's startup npm chatter and update checks.
     cmd.env("PI_OFFLINE", "1");
     cmd.env("npm_config_loglevel", "error");
-    // pi reads `LLAMA_BASE_URL` ("llama.cpp server URL") from the environment
-    // and has no `--base-url` flag, so this is the one endpoint a profile can
-    // move per spawn. Its other providers take their URL from pi's own config,
-    // which wsx has no business rewriting.
+    // Still set, but it does **not** move pi's endpoint — see
+    // `AgentKind::endpoint_support`. pi resolves its llama.cpp server as
+    // `stored credential ?? $LLAMA_BASE_URL`, and the credential `/login
+    // llama.cpp` writes always carries a URL, so the variable is dead for any
+    // pi that has models to run. What it still does is prefill the URL prompt
+    // if the user logs in from inside this session, which is worth the one
+    // line — and `endpoint_support` says `None` for pi, so nothing downstream
+    // records or claims an endpoint from it.
     //
     // Set after the inherited environment above so a profile beats whatever the
-    // TUI itself was launched with, matching how claude's endpoint is applied.
+    // TUI itself was launched with.
     if let Some(base_url) = &selection.base_url {
         cmd.env("LLAMA_BASE_URL", base_url);
     }
@@ -1654,10 +1658,13 @@ mod tests {
         }
     }
 
-    /// pi reads `LLAMA_BASE_URL` ("llama.cpp server URL") and has no
-    /// `--base-url` flag, so that is the one endpoint a profile can move for it.
+    /// pi is handed `LLAMA_BASE_URL` to prefill its `/login llama.cpp` prompt,
+    /// not to move its endpoint — it resolves that from its stored credential
+    /// first, and a logged-in pi ran normally with this variable pointing at a
+    /// dead port. `endpoint_support` says `None` for pi so nothing claims
+    /// otherwise; this test pins the variable, not a capability.
     #[test]
-    fn build_pi_command_points_at_a_llama_server() {
+    fn build_pi_command_prefills_the_llama_login_url() {
         use crate::pty::ModelSelection;
         let cwd = PathBuf::from(".");
         let mode = SpawnMode::Fresh {

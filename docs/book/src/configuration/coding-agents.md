@@ -10,7 +10,7 @@ Supported agents:
 | Agent              | CLI option       | Source                                                                    | Config                                    |
 | ------------------ | ---------------- | ------------------------------------------------------------------------- | ----------------------------------------- |
 | `claude` (default) | `--agent claude` | `claude` binary (override via `WSX_CLAUDE_BIN`)                           | `WSX_CLAUDE_MODEL`, [model profiles](model-profiles.md), `~/.claude.json` MCP |
-| `pi`               | `--agent pi`     | `pi` binary, [`@earendil-works/pi-coding-agent`](https://github.com/earendil-works/pi) (override via `WSX_PI_BIN`) | `~/.pi/`, [model profiles](model-profiles.md) (llama.cpp endpoints) |
+| `pi`               | `--agent pi`     | `pi` binary, [`@earendil-works/pi-coding-agent`](https://github.com/earendil-works/pi) (override via `WSX_PI_BIN`) | `~/.pi/`, [model profiles](model-profiles.md) (model only — pi's own `/login` owns the endpoint) |
 | `hermes`           | `--agent hermes` | [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent) | `~/.hermes/config.yaml` (provider, model) |
 | `codex`            | `--agent codex`  | `codex` binary (override via `WSX_CODEX_BIN`)                             | `~/.codex/config.toml`, [model profiles](model-profiles.md) (local providers) |
 | `omp`              | `--agent omp`    | `omp` binary, [oh-my-pi](https://github.com/can1357/oh-my-pi) (override via `WSX_OMP_BIN`) | `~/.omp/agent/config.yml` |

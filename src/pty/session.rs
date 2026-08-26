@@ -721,6 +721,37 @@ pub struct SpawnIdentity {
     pub instance_id: i64,
 }
 
+/// The endpoint to record as the one this session's agent is actually talking
+/// to, or `None`.
+///
+/// Split out and kept pure because getting it wrong is not cosmetic and nothing
+/// used to test it. `pending_model` compares this against what the row resolves
+/// to, and `endpoint_peer_count` counts workspaces by it — so a phantom entry
+/// makes the dashboard claim a workspace is on a server its agent never
+/// contacted, and a missing one makes a pinned workspace claim a queued change
+/// forever. Both have happened: pi recorded a URL it demonstrably ignores, and
+/// codex recorded none while `CODEX_OSS_BASE_URL` was reaching a real server.
+fn endpoint_to_record(
+    support: crate::pty::EndpointSupport,
+    base_url: Option<&str>,
+    provider: Option<&str>,
+) -> Option<String> {
+    match support {
+        // Handed the URL directly, in its own environment variable.
+        crate::pty::EndpointSupport::BaseUrl => base_url.map(str::to_string),
+        // Reached by provider name, with the URL redirecting that provider.
+        // Mirrors `build_codex_command`'s own condition: without the provider
+        // there is no `--oss` mode and the URL is never consulted.
+        crate::pty::EndpointSupport::LocalProvider => provider
+            .filter(|p| matches!(*p, "ollama" | "lmstudio"))
+            .and(base_url)
+            .map(str::to_string),
+        // Takes its endpoint from its own config or credential store, whatever
+        // wsx puts in the environment.
+        crate::pty::EndpointSupport::None => None,
+    }
+}
+
 // Threading the tmux session name into the spawn path adds an eighth input
 // past clippy's default; bundling these into a params struct would not improve
 // clarity, matching the same allowance on `SessionManager::spawn`.
@@ -773,41 +804,21 @@ pub fn spawn_session(
                 .and_then(|var| selection.model_or_env(var))
         })
         .flatten();
-    // Only claude is wired to an arbitrary endpoint. Recording one for an
-    // agent that cannot use it would make the dashboard claim a workspace is on
-    // a local server when its agent never went there.
-    // Only an agent that was actually handed a URL records one. Codex reaches a
-    // local server by provider name instead, and recording a URL it never saw
-    // would make the dashboard claim a workspace is on a server its agent never
-    // contacted — which is what the contention count reads.
-    let spawned_endpoint = match agent.endpoint_support() {
-        crate::pty::EndpointSupport::BaseUrl => selection.base_url.clone(),
-        // Codex reaches a local server by provider name, and when a profile
-        // also names a URL the builder passes it as `CODEX_OSS_BASE_URL` — so
-        // it genuinely does contact that host and the record must say so.
-        // Mirrors `build_codex_command`'s own condition: without the provider
-        // there is no `--oss` mode and the URL is never consulted.
-        //
-        // Getting this wrong is not cosmetic. `pending_model` compares this
-        // against the endpoint the row resolves to, so recording `None` while
-        // the row says `Some` left every pinned codex workspace claiming a
-        // queued change forever; and `endpoint_peer_count` reads it, so codex
-        // workspaces sharing one ollama all reported zero peers.
-        crate::pty::EndpointSupport::LocalProvider => selection
-            .provider_or_env(agent.provider_env().unwrap_or("WSX_CODEX_PROVIDER"))
-            .filter(|p| matches!(p.as_str(), "ollama" | "lmstudio"))
-            .and(selection.base_url.clone()),
-        crate::pty::EndpointSupport::None => {
-            if selection.base_url.is_some() {
-                tracing::warn!(
-                    agent = agent.display_name(),
-                    "model profile sets base_url, but this agent takes its endpoint from its \
-                     own config; only the model is being applied"
-                );
-            }
-            None
-        }
-    };
+    let resolved_provider =
+        selection.provider_or_env(agent.provider_env().unwrap_or("WSX_CODEX_PROVIDER"));
+    if agent.endpoint_support() == crate::pty::EndpointSupport::None && selection.base_url.is_some()
+    {
+        tracing::warn!(
+            agent = agent.display_name(),
+            "model profile sets base_url, but this agent takes its endpoint from its \
+             own config; only the model is being applied"
+        );
+    }
+    let spawned_endpoint = endpoint_to_record(
+        agent.endpoint_support(),
+        selection.base_url.as_deref(),
+        resolved_provider.as_deref(),
+    );
     // `tmux new-session -A` attaches to a surviving session instead of running
     // the command, so on a re-attach none of the above reaches the agent — it
     // is still the process started earlier, with the environment it was born
@@ -1134,6 +1145,61 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
+    use crate::pty::EndpointSupport;
+
+    /// One case per agent, because the wrong answer is invisible: the value
+    /// only shows up as a contention count or a "pending" notice on the
+    /// dashboard, and both read plausibly whichever way this goes.
+    #[test]
+    fn only_an_agent_that_was_handed_the_url_records_one() {
+        let url = Some("http://gpu.lan:11434");
+
+        // claude: `ANTHROPIC_BASE_URL`, so it really is talking to that host.
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::BaseUrl, url, None),
+            Some("http://gpu.lan:11434".to_string())
+        );
+
+        // codex: only with a provider, since `CODEX_OSS_BASE_URL` is read in
+        // `--oss` mode alone.
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::LocalProvider, url, Some("ollama")),
+            Some("http://gpu.lan:11434".to_string())
+        );
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::LocalProvider, url, None),
+            None
+        );
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::LocalProvider, url, Some("bogus")),
+            None
+        );
+
+        // pi, hermes, omp: the URL is set in the environment and ignored.
+        // Recording it made a pi workspace count toward another workspace's
+        // contention for a server pi never opened a socket to.
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::None, url, None),
+            None
+        );
+        assert_eq!(
+            super::endpoint_to_record(EndpointSupport::None, url, Some("ollama")),
+            None
+        );
+
+        // No profile, nothing to record, for any of them.
+        for support in [
+            EndpointSupport::BaseUrl,
+            EndpointSupport::LocalProvider,
+            EndpointSupport::None,
+        ] {
+            assert_eq!(
+                super::endpoint_to_record(support, None, Some("ollama")),
+                None
+            );
+        }
+    }
+
     use super::*;
     use crate::test_support::EnvGuard;
     use std::path::PathBuf;

@@ -110,9 +110,20 @@ impl AgentKind {
     /// agent that will quietly ignore half of it.
     pub fn endpoint_support(self) -> EndpointSupport {
         match self {
-            AgentKind::Claude | AgentKind::Pi => EndpointSupport::BaseUrl,
+            AgentKind::Claude => EndpointSupport::BaseUrl,
             AgentKind::Codex => EndpointSupport::LocalProvider,
-            AgentKind::Hermes | AgentKind::Omp => EndpointSupport::None,
+            // pi belongs here with hermes and omp, not with claude, and this
+            // was measured rather than reasoned. pi resolves its llama.cpp
+            // endpoint as `stored credential ?? $LLAMA_BASE_URL`, and the
+            // credential written by `/login llama.cpp` always carries a URL —
+            // so once pi is usable at all the environment is never consulted.
+            // Driven directly: a logged-in pi answered normally with
+            // `LLAMA_BASE_URL` pointing at a dead port. Without a credential
+            // the variable *is* read, but `refreshModels` only fetches a
+            // catalog from a credential, so there are no models to select and
+            // nothing can run. There is no state in which wsx moves pi's
+            // endpoint.
+            AgentKind::Pi | AgentKind::Hermes | AgentKind::Omp => EndpointSupport::None,
         }
     }
 
@@ -166,7 +177,7 @@ mod endpoint_support_tests {
             AgentKind::Claude.endpoint_support(),
             EndpointSupport::BaseUrl
         );
-        assert_eq!(AgentKind::Pi.endpoint_support(), EndpointSupport::BaseUrl);
+        assert_eq!(AgentKind::Pi.endpoint_support(), EndpointSupport::None);
         assert_eq!(
             AgentKind::Codex.endpoint_support(),
             EndpointSupport::LocalProvider

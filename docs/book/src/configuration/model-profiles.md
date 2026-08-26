@@ -57,7 +57,7 @@ what a profile can promise. Each row was established by reading the tool.
 | Agent | `model` | endpoint | how |
 | --- | --- | --- | --- |
 | `claude` | yes | **`base_url`** | `ANTHROPIC_BASE_URL` in the environment |
-| `pi` | yes | **`base_url`** | `LLAMA_BASE_URL` — llama.cpp servers |
+| `pi` | yes | no | its stored `/login` credential owns the URL |
 | `codex` | yes | **`provider`** (+ optional `base_url`) | `--oss --local-provider ollama\|lmstudio`, redirected by `CODEX_OSS_BASE_URL` |
 | `hermes` | yes | no | its `config.yaml` beats anything wsx can set |
 | `omp` | yes | no | custom providers live in `~/.omp/agent/models.yml` |
@@ -103,11 +103,28 @@ Codex does not restore a provider from a resumed session: without the flags, the
 second attach of a locally-pinned workspace sends the local model's name to
 OpenAI's own API on the user's account.
 
-**Hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint as
-`argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins over
-anything wsx can set and there is no flag; omp reads custom providers only from
-its own `models.yml`. Both already reach any model through their own
+**pi, hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint
+as `argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins
+over anything wsx can set and there is no flag; omp reads custom providers only
+from its own `models.yml`. All three already reach any model through their own
 configuration, which is why this is a limitation rather than a gap.
+
+pi looks like it should be movable and is not. It resolves its llama.cpp server
+as `stored credential ?? $LLAMA_BASE_URL`, and the credential written by
+`/login llama.cpp` always carries a URL — so the environment is consulted only
+by a pi that has never logged in, and a pi that has never logged in has no model
+catalog to select from, because it only fetches one for a stored credential.
+Driven directly: a logged-in pi answered normally with `LLAMA_BASE_URL` pointing
+at a dead port. wsx still sets the variable, because it prefills the URL prompt
+if you log in from inside the session, but it records no endpoint for pi and
+warns if a profile names one.
+
+Pin pi to a **model** instead, qualified by provider, and let pi's own login
+hold the URL:
+
+```text
+local-pi  model=llama.cpp/qwen3.8-27b
+```
 
 None of it is silent. The CLI warns when a profile carries an endpoint the
 chosen agent cannot use, and wsx records no endpoint for that session — so the
@@ -120,8 +137,9 @@ warning: profile 'local-qwen' sets base_url, but codex cannot be given an
 arbitrary endpoint — set `provider=ollama` or `provider=lmstudio` instead
 ```
 
-No token is forwarded to `pi`: it reads no API-key environment variable, and its
-only mechanism is `--api-key`, which would put the secret in the process list.
+No token is forwarded to `pi`. It does read `LLAMA_API_KEY`, but only for the
+endpoint its own credential names — which wsx does not choose — and its other
+mechanism is `--api-key`, which would put the secret in the process list.
 
 ## Choosing a profile
 
