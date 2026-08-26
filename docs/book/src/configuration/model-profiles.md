@@ -98,6 +98,11 @@ with no thinking mode at all, which answers `"<model>" does not support thinking
 to anything else. A codex spawn that is *not* redirected to a local provider is
 left alone — its effort is whatever the user configured.
 
+All of this is re-applied when a session **resumes**, not just when it starts.
+Codex does not restore a provider from a resumed session: without the flags, the
+second attach of a locally-pinned workspace sends the local model's name to
+OpenAI's own API on the user's account.
+
 **Hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint as
 `argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins over
 anything wsx can set and there is no flag; omp reads custom providers only from

@@ -738,10 +738,15 @@ pub fn build_codex_command(
     // path codex ships for exactly this, and it is what a profile's `provider`
     // selects — the URL then rides along in the environment, below.
     //
-    // Fresh-only, like the `-c` overrides above: `codex resume --last` restores
-    // the session's stored provider and would fight a flag re-asserted here.
-    if !resume
-        && let Some(provider) = selection.provider_or_env("WSX_CODEX_PROVIDER")
+    // Re-asserted on resume, unlike the `-c` instruction overrides above. A
+    // resumed session does *not* restore its provider: driving it live, the
+    // second attach of a workspace pinned to a local ollama sent the local
+    // model's name to OpenAI's own API on the user's ChatGPT account, which
+    // answered `The 'qwen2.5:7b' model is not supported when using Codex with a
+    // ChatGPT account.` — so re-attaching a local workspace silently left the
+    // machine. Connection config is not conversation content; it belongs on
+    // every spawn.
+    if let Some(provider) = selection.provider_or_env("WSX_CODEX_PROVIDER")
         && matches!(provider.as_str(), "ollama" | "lmstudio")
     {
         cmd.arg("--oss");
@@ -1600,10 +1605,51 @@ mod tests {
                 provider: Some("ollama".into()),
                 ..Default::default()
             };
-            let a = argv_of(&build(&cont, &sel));
+            let cmd = build(&cont, &sel);
+            let a = argv_of(&cmd);
+            // Re-asserted, and this test used to assert the opposite. A resumed
+            // codex session does not restore its provider: driven live, the
+            // second attach of a workspace pinned to a local ollama sent the
+            // local model name to OpenAI on the user's own ChatGPT account
+            // (`The 'qwen2.5:7b' model is not supported when using Codex with a
+            // ChatGPT account.`). Re-attaching is the common case, so the
+            // failing half was the half that ran.
             assert!(
-                !a.iter().any(|x| x == "--oss"),
-                "resume must not re-assert: {a:?}"
+                a.iter().any(|x| x == "--oss"),
+                "resume must re-assert: {a:?}"
+            );
+            assert_eq!(
+                after(&a, "--local-provider").as_deref(),
+                Some("ollama"),
+                "{a:?}"
+            );
+            assert!(
+                a.iter().any(|x| x == "model_reasoning_effort=none"),
+                "{a:?}"
+            );
+        }
+
+        // Same for the redirect: a resumed session that lost its base URL falls
+        // back to codex's default local port, which is a different machine's
+        // ollama or nothing at all.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let cont = SpawnMode::Continue {
+                custom_instructions: None,
+                doctrine: None,
+                additional_dirs: vec![],
+                yolo: false,
+            };
+            let sel = ModelSelection {
+                provider: Some("ollama".into()),
+                base_url: Some("http://gpu.lan:11434".into()),
+                ..Default::default()
+            };
+            let cmd = build(&cont, &sel);
+            assert_eq!(
+                cmd.get_env("CODEX_OSS_BASE_URL").and_then(|v| v.to_str()),
+                Some("http://gpu.lan:11434/v1")
             );
         }
     }
