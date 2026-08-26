@@ -90,8 +90,13 @@ pub fn render_agents_panel(
     lines.push(Line::from(add));
     lines.push(Line::from(""));
     lines.push(Line::from(
-        "Enter add   a add all   x remove   p model   \u{2191}\u{2193} move   Esc close",
+        "Enter add   a add all   x remove   \u{2191}\u{2193} move   Esc close",
     ));
+    // On its own line for two reasons: adding it to the row above pushed that
+    // row past the panel's 58 inner columns and chopped "Esc close" down to
+    // "Esc"; and the attached list has no cursor, so "p model" alone never said
+    // which row it moves. It moves the primary.
+    lines.push(Line::from("p   cycle the primary agent's model"));
 
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -197,6 +202,31 @@ mod tests {
         let text = draw(&rows, false);
         assert!(text.contains("[local-qwen]"), "{text}");
         assert!(!text.contains('→'), "{text}");
+    }
+
+    /// Every hint line must fit the panel's inner width. Adding a model hint to
+    /// the existing footer pushed it from 54 to 64 columns and silently chopped
+    /// "Esc close" down to "Esc" for everyone who opened the panel.
+    #[test]
+    fn every_footer_line_fits_the_panel() {
+        let rows = vec![(instance(), false, None, None)];
+        let text = draw(&rows, false);
+        assert!(
+            text.contains("Esc close"),
+            "close hint was truncated:\n{text}"
+        );
+        assert!(
+            text.contains("cycle the primary agent's model"),
+            "the model hint must name its target:\n{text}"
+        );
+        // Nothing inside the box may reach its right border.
+        for line in text.lines().filter(|l| l.contains('\u{2502}')) {
+            let inner: String = line.trim().trim_matches('\u{2502}').to_string();
+            assert!(
+                inner.chars().count() <= 58,
+                "line exceeds the 58-column panel: {inner:?}"
+            );
+        }
     }
 
     /// A long profile name must not run off a fixed-width box and get clipped

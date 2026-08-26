@@ -1902,11 +1902,13 @@ fn capture_model_env_records_the_creating_process_environment() {
         assert_eq!(row.model, None);
     }
 
-    // claude has no model variable yet, so an unrelated export must not be
-    // mistaken for one.
+    // A variable belonging to another agent must not be mistaken for this
+    // one's. claude does have `WSX_CLAUDE_MODEL` now, so it is removed here —
+    // otherwise a developer with it exported sees this test fail.
     {
         let (store, ws, inst) = seed_ws_for_capture(AgentKind::Claude);
         let mut env = EnvGuard::new();
+        env.remove("WSX_CLAUDE_MODEL");
         env.set("WSX_OMP_MODEL", "not-for-claude");
         capture_model_env(&store, ws, AgentKind::Claude).unwrap();
         let row = store.workspace_agents_by_id(inst).unwrap().unwrap();

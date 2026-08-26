@@ -127,8 +127,17 @@ impl AgentKind {
         match self {
             AgentKind::Pi => Some("WSX_PI_PROVIDER"),
             AgentKind::Hermes => Some("WSX_HERMES_PROVIDER"),
-            AgentKind::Omp => Some("WSX_OMP_PROVIDER"),
-            AgentKind::Claude | AgentKind::Codex => None,
+            // Codex reads this to choose `--oss --local-provider`. It has to be
+            // listed here or the capture path never records it: a
+            // `WSX_CODEX_PROVIDER` set on `workspace create` would be read by
+            // the builder at spawn, in a TUI process that never saw it, and the
+            // workspace would come up on the paid cloud backend instead of the
+            // local one that was asked for.
+            AgentKind::Codex => Some("WSX_CODEX_PROVIDER"),
+            // Omp has no provider path — `build_omp_command` never reads one —
+            // so advertising a variable here would capture a value onto the row
+            // that nothing will ever apply.
+            AgentKind::Claude | AgentKind::Omp => None,
         }
     }
 

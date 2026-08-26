@@ -50,13 +50,17 @@ impl DetailModule for Model {
         // default)" above "X on next spawn" describes a process that does not
         // exist and a change that is not a change.
         match (ctx.agent_live, ctx.model_running.as_deref()) {
-            // Not running: whatever it will start on, stated plainly.
-            (false, _) => push(
-                &mut lines,
-                ctx.model_pending
+            // Not running: whatever it will start on. Said as a future, because
+            // "(agent default)" alone read identically to a live agent on the
+            // agent's own default — two different situations in one sentence,
+            // which is the ambiguity `agent_live` exists to remove.
+            (false, _) => {
+                let starts_on = ctx
+                    .model_pending
                     .clone()
-                    .unwrap_or_else(|| "(agent default)".to_string()),
-            ),
+                    .unwrap_or_else(|| "agent default".to_string());
+                push(&mut lines, format!("starts on {starts_on}"));
+            }
             // Running, on something nameable.
             (true, Some(model)) => {
                 push(&mut lines, model.to_string());
@@ -117,13 +121,27 @@ mod tests {
         let mut ctx = stub_context();
         ctx.agent_live = false;
         ctx.model_pending = Some("local-qwen".to_string());
-        assert_eq!(text_of(&Model.lines(&ctx, 40)), vec!["local-qwen"]);
+        assert_eq!(
+            text_of(&Model.lines(&ctx, 40)),
+            vec!["starts on local-qwen"]
+        );
     }
 
+    /// Idle and live-on-the-default must not read the same. Both used to print
+    /// "(agent default)", so a workspace nobody had opened was indistinguishable
+    /// from one with a live agent on Claude's own default — the exact ambiguity
+    /// `agent_live` was added to remove.
     #[test]
-    fn not_running_and_unpinned_reads_as_the_agent_default() {
+    fn not_running_and_unpinned_reads_as_a_future_not_a_fact() {
         let ctx = stub_context();
-        assert_eq!(text_of(&Model.lines(&ctx, 40)), vec!["(agent default)"]);
+        assert_eq!(
+            text_of(&Model.lines(&ctx, 40)),
+            vec!["starts on agent default"]
+        );
+
+        let mut live = stub_context();
+        live.agent_live = true;
+        assert_eq!(text_of(&Model.lines(&live, 40)), vec!["(agent default)"]);
     }
 
     #[test]

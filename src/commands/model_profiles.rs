@@ -259,17 +259,11 @@ pub fn selection_for(
 ) -> crate::pty::ModelSelection {
     let named = instance.model_profile.as_deref();
     let profile = match named {
-        Some(name) => {
-            let found = profiles.iter().find(|p| p.name == name).cloned();
-            if found.is_none() {
-                tracing::warn!(
-                    profile = name,
-                    "workspace is pinned to a model profile that no longer exists; \
-                     falling back to the ambient environment"
-                );
-            }
-            found
-        }
+        // Deliberately silent. This runs per agent, per frame from the render
+        // path; warning here wrote the same line to the log dozens of times a
+        // second for as long as a workspace with a stale pin stayed selected.
+        // The spawn path warns once, where it matters.
+        Some(name) => profiles.iter().find(|p| p.name == name).cloned(),
         None => None,
     };
     match profile {

@@ -246,8 +246,28 @@ impl App {
         &self,
         inst: &crate::data::agents::AgentInstance,
     ) -> Option<String> {
+        // Liveness first. Nothing evicts a `Session` when its child exits — the
+        // status flips to `Exited` and the record stays — so "there is a Session
+        // object" is not "there is an agent". Reading the corpse made a stopped
+        // workspace report the dead process's endpoint, which then counted
+        // toward contention and suppressed the pending notice.
+        if !self.instance_is_running(inst.id) {
+            return None;
+        }
         let session = self.sessions.get(inst.id)?;
         session.spawned_endpoint.clone()
+    }
+
+    /// The provider an instance's running agent actually started with, for the
+    /// agents that select a backend by name rather than by URL.
+    pub fn instance_running_provider(
+        &self,
+        inst: &crate::data::agents::AgentInstance,
+    ) -> Option<String> {
+        if !self.instance_is_running(inst.id) {
+            return None;
+        }
+        self.sessions.get(inst.id)?.spawned_provider.clone()
     }
 
     /// The model an instance's running agent actually started on.
@@ -255,6 +275,14 @@ impl App {
         &self,
         inst: &crate::data::agents::AgentInstance,
     ) -> Option<String> {
+        // See `instance_running_endpoint`: an exited session keeps its record,
+        // so without this a workspace whose agent had stopped claimed to be
+        // running the model that agent had used — and the panel then showed
+        // "(agent default)" for a workspace that is pinned and will start on
+        // something else entirely.
+        if !self.instance_is_running(inst.id) {
+            return None;
+        }
         let session = self.sessions.get(inst.id)?;
         session.spawned_model.clone()
     }
@@ -297,14 +325,33 @@ impl App {
             .supports_endpoint()
             .then(|| next.base_url.clone())
             .flatten();
+        // The provider is part of the answer too: for codex it *is* the endpoint
+        // mechanism, so moving `ollama` → `lmstudio` changes which server the
+        // next spawn talks to while leaving model and base_url untouched.
+        let next_provider = inst
+            .agent
+            .provider_env()
+            .and_then(|var| next.provider_or_env(var));
         let running_model = self.instance_running_model(inst);
         let running_endpoint = self.instance_running_endpoint(inst);
-        if next_model == running_model && next_endpoint == running_endpoint {
+        let running_provider = self.instance_running_provider(inst);
+        if next_model == running_model
+            && next_endpoint == running_endpoint
+            && next_provider == running_provider
+        {
             return None;
         }
+        // Name the profile only while it still resolves. A pin whose profile has
+        // been deleted falls back at spawn, so promising the dead name would
+        // describe something that will not happen — the same mistake as reading
+        // the pin instead of the session, one field over.
+        let resolved_profile = inst
+            .model_profile
+            .as_deref()
+            .filter(|name| self.model_profiles.iter().any(|p| p.name == *name))
+            .map(str::to_string);
         Some(
-            inst.model_profile
-                .clone()
+            resolved_profile
                 .or(next_model)
                 .unwrap_or_else(|| "(agent default)".to_string()),
         )
@@ -326,13 +373,16 @@ impl App {
             .iter()
             .filter(|(ws, _)| **ws != excluding)
             .filter(|(_, instances)| {
-                // Strictly running, not `strip_instances`: the strip keeps a
-                // peer whose PTY died with the previous wsx, but a process
-                // that is not running is not queued on the endpoint.
-                instances.iter().any(|inst| {
-                    self.instance_is_running(inst.id)
-                        && self.instance_running_endpoint(inst).as_deref() == Some(endpoint)
-                })
+                // Iterate the roster directly rather than `strip_instances`,
+                // which clones every matching instance into a fresh Vec — this
+                // runs for every workspace on every frame, and the comment on
+                // `has_live_instance` says as much about cloning to answer a
+                // yes/no question. Liveness comes from
+                // `instance_running_endpoint`, which returns `None` for an
+                // instance that is not running.
+                instances
+                    .iter()
+                    .any(|inst| self.instance_running_endpoint(inst).as_deref() == Some(endpoint))
             })
             .count()
     }
@@ -344,18 +394,6 @@ impl App {
     /// registered in the DB, killed by a previous wsx quit — keeps its bar,
     /// since sessions never survive a restart and the roster is the only
     /// record that the agent exists.
-    ///
-    /// Reads the cached `agent_roster`, so it can lag behind the DB by up to
-    /// one `refresh()` — fine for the dashboard render path this feeds, but
-    /// wrong for a caller that just mutated the roster and needs the result
-    /// to reflect that mutation immediately (see `toggle_workspace_shared`,
-    /// which filters its own freshly-fetched instance list instead of
-    /// calling this).
-    /// The workspace's agent instances that currently have a running
-    /// session, in roster order (primary first). Instances registered in
-    /// the DB but with no session — never started, or exited — are
-    /// excluded: nothing reaps an instance row when its agent exits, so
-    /// "registered" and "running" diverge permanently.
     ///
     /// Reads the cached `agent_roster`, so it can lag behind the DB by up to
     /// one `refresh()` — fine for the dashboard render path this feeds, but
@@ -923,6 +961,12 @@ mod strip_instances_tests {
     /// about to change.
     #[test]
     fn pending_model_notices_a_model_change_with_no_endpoint_change() {
+        // `pending_model` resolves through `model_or_env`, so an exported
+        // WSX_CLAUDE_MODEL — the variable this feature documents — would
+        // otherwise decide the result. The guard also takes ENV_LOCK, which the
+        // builder tests hold while mutating the same variable.
+        let mut env = crate::test_support::EnvGuard::new();
+        env.remove("WSX_CLAUDE_MODEL");
         let mut app = test_app();
         app.store
             .set_setting("model_profiles", "cheap model=haiku")
@@ -965,6 +1009,12 @@ mod strip_instances_tests {
     /// exactly like doing nothing.
     #[test]
     fn pending_model_reports_a_revert_to_the_agent_default() {
+        // `pending_model` resolves through `model_or_env`, so an exported
+        // WSX_CLAUDE_MODEL — the variable this feature documents — would
+        // otherwise decide the result. The guard also takes ENV_LOCK, which the
+        // builder tests hold while mutating the same variable.
+        let mut env = crate::test_support::EnvGuard::new();
+        env.remove("WSX_CLAUDE_MODEL");
         let mut app = test_app();
         app.store
             .set_setting("model_profiles", "cheap model=haiku")
@@ -1032,13 +1082,23 @@ mod strip_instances_tests {
                     .set_instance_model_profile(inst, Some(pin))
                     .unwrap();
             }
-            if let Some(endpoint) = spawned_on {
-                app.sessions.insert_fake_session_spawned_on(
+            // "cloud-ish" stands for a live agent that went somewhere other
+            // than LOCAL — it records no endpoint, exactly as a cloud spawn
+            // does, while still being alive.
+            match spawned_on {
+                Some("cloud-ish") => app.sessions.insert_fake_session_spawned_on(
+                    inst,
+                    SessionStatus::Running { pid: 1 },
+                    Some("claude-opus"),
+                    None,
+                ),
+                Some(endpoint) => app.sessions.insert_fake_session_spawned_on(
                     inst,
                     SessionStatus::Running { pid: 1 },
                     Some("qwen3.8-27b"),
                     Some(endpoint),
-                );
+                ),
+                None => {}
             }
             app.refresh().unwrap();
             ws
@@ -1046,10 +1106,13 @@ mod strip_instances_tests {
 
         let subject = seed(&mut app, "subject", Some("local"), Some(LOCAL));
         let _peer = seed(&mut app, "peer", Some("local"), Some(LOCAL));
-        // Pinned to the same profile, but its running agent went to the cloud
-        // because the pin changed after it started. This is the case that was
-        // being miscounted.
-        let _pinned_but_elsewhere = seed(&mut app, "stale", Some("local"), None);
+        // Pinned to the same profile, but its running agent went somewhere else
+        // because the pin changed after it started. This needs a LIVE session
+        // recording a different endpoint — seeding it with no session at all
+        // would be filtered out by liveness before the endpoint is ever
+        // compared, and the test would pass even if the count went back to
+        // reading the pin.
+        let _pinned_but_elsewhere = seed(&mut app, "stale", Some("local"), Some("cloud-ish"));
         // Pinned and not running at all: competing for nothing.
         let _idle = seed(&mut app, "idle", Some("local"), None);
 

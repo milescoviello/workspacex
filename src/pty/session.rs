@@ -157,6 +157,12 @@ pub struct Session {
     /// rather than the row, or it reports intentions as facts.
     pub spawned_model: Option<String>,
     pub spawned_endpoint: Option<String>,
+    /// The backend this session was started against by name, for agents that
+    /// select one that way. Recorded alongside the endpoint because for codex
+    /// the provider *is* the endpoint mechanism, so a change from `ollama` to
+    /// `lmstudio` moves the next spawn to a different server while model and
+    /// URL stay put.
+    pub spawned_provider: Option<String>,
 }
 
 impl Session {
@@ -594,6 +600,7 @@ impl Session {
             tmux_session: None,
             spawned_model: None,
             spawned_endpoint: None,
+            spawned_provider: None,
         }
     }
 }
@@ -750,9 +757,22 @@ pub fn spawn_session(
     // Record what this spawn actually resolved to, before the command is
     // consumed. The builders above already applied it; capturing it here is
     // what lets the UI distinguish a running agent's model from its row's.
-    let spawned_model = agent
-        .model_env()
-        .and_then(|var| selection.model_or_env(var));
+    // Recorded only when the builder actually applied it. pi and omp pass a
+    // model on a fresh spawn and let `--continue` / `-c` restore the stored one
+    // on resume, so recording it there would claim the resumed agent moved when
+    // it did not — and `pending_model` would then see no difference and hide
+    // the fact that the pin is still waiting.
+    let model_applies = match agent {
+        AgentKind::Pi | AgentKind::Omp => matches!(mode, SpawnMode::Fresh { .. }),
+        _ => true,
+    };
+    let spawned_model = model_applies
+        .then(|| {
+            agent
+                .model_env()
+                .and_then(|var| selection.model_or_env(var))
+        })
+        .flatten();
     // Only claude is wired to an arbitrary endpoint. Recording one for an
     // agent that cannot use it would make the dashboard claim a workspace is on
     // a local server when its agent never went there.
@@ -762,7 +782,21 @@ pub fn spawn_session(
     // contacted — which is what the contention count reads.
     let spawned_endpoint = match agent.endpoint_support() {
         crate::pty::EndpointSupport::BaseUrl => selection.base_url.clone(),
-        crate::pty::EndpointSupport::LocalProvider => None,
+        // Codex reaches a local server by provider name, and when a profile
+        // also names a URL the builder passes it as `CODEX_OSS_BASE_URL` — so
+        // it genuinely does contact that host and the record must say so.
+        // Mirrors `build_codex_command`'s own condition: without the provider
+        // there is no `--oss` mode and the URL is never consulted.
+        //
+        // Getting this wrong is not cosmetic. `pending_model` compares this
+        // against the endpoint the row resolves to, so recording `None` while
+        // the row says `Some` left every pinned codex workspace claiming a
+        // queued change forever; and `endpoint_peer_count` reads it, so codex
+        // workspaces sharing one ollama all reported zero peers.
+        crate::pty::EndpointSupport::LocalProvider => selection
+            .provider_or_env(agent.provider_env().unwrap_or("WSX_CODEX_PROVIDER"))
+            .filter(|p| matches!(p.as_str(), "ollama" | "lmstudio"))
+            .and(selection.base_url.clone()),
         crate::pty::EndpointSupport::None => {
             if selection.base_url.is_some() {
                 tracing::warn!(
@@ -774,9 +808,14 @@ pub fn spawn_session(
             None
         }
     };
+    // Only the agents that actually select a backend by name record one.
+    let spawned_provider = agent
+        .provider_env()
+        .and_then(|var| selection.provider_or_env(var));
     let mut session = spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)?;
     session.spawned_model = spawned_model;
     session.spawned_endpoint = spawned_endpoint;
+    session.spawned_provider = spawned_provider;
     Ok(session)
 }
 
@@ -923,6 +962,7 @@ pub fn spawn_command_session(
         tmux_session: tmux.map(str::to_string),
         spawned_model: None,
         spawned_endpoint: None,
+        spawned_provider: None,
     })
 }
 
@@ -1017,6 +1057,7 @@ impl SessionManager {
         let mut session = Session::fake(status);
         session.spawned_model = model.map(str::to_string);
         session.spawned_endpoint = endpoint.map(str::to_string);
+        session.spawned_provider = None;
         self.sessions.insert(id, Arc::new(session));
     }
 

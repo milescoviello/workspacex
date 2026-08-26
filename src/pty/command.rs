@@ -169,20 +169,33 @@ pub fn build_claude_command(
     // them would quietly fail over to the default endpoint.
     if let Some(base_url) = &selection.base_url {
         cmd.env("ANTHROPIC_BASE_URL", base_url);
-    }
-    if let Some(var) = &selection.auth_token_env {
-        // Absent is not an error: an endpoint on localhost usually wants no
-        // token at all, and failing the spawn over a missing one would make
-        // the common local case the awkward one.
-        match std::env::var(var) {
-            Ok(token) if !token.trim().is_empty() => {
-                cmd.env("ANTHROPIC_AUTH_TOKEN", token);
+        // Redirecting the endpoint drops the inherited Anthropic credentials
+        // first. The whole parent environment was copied above, so a key the
+        // user exported for their own use would otherwise be presented to
+        // whatever host the profile names — a local server, or someone else's
+        // box. The profile decides what credential the redirected endpoint
+        // sees, and if it names none, none is sent.
+        cmd.env_remove("ANTHROPIC_API_KEY");
+        cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
+        if let Some(var) = &selection.auth_token_env {
+            // Absent is not an error: an endpoint on localhost usually wants no
+            // token at all, and failing the spawn over a missing one would make
+            // the common local case the awkward one.
+            match std::env::var(var) {
+                Ok(token) if !token.trim().is_empty() => {
+                    cmd.env("ANTHROPIC_AUTH_TOKEN", token);
+                }
+                _ => tracing::debug!(
+                    var = var.as_str(),
+                    "auth_token_env names an unset or empty variable; spawning without a token"
+                ),
             }
-            _ => tracing::debug!(
-                var = var.as_str(),
-                "auth_token_env names an unset or empty variable; spawning without a token"
-            ),
         }
+    } else if selection.auth_token_env.is_some() {
+        // A token without an endpoint would replace the user's own credential
+        // on the default host, which is not what naming a token in a profile
+        // asks for.
+        tracing::debug!("auth_token_env is set without a base_url; ignoring it");
     }
     if let Some(max_context) = selection.max_context {
         cmd.env("CLAUDE_CODE_MAX_CONTEXT_TOKENS", max_context.to_string());
@@ -1610,6 +1623,44 @@ mod tests {
                 cmd.get_env("ANTHROPIC_BASE_URL").and_then(|v| v.to_str()),
                 Some("http://127.0.0.1:8091"),
                 "a missing token must not cost the endpoint"
+            );
+        }
+
+        // A key the user exported for their own use must not be handed to a
+        // machine the profile redirects to. Before this, the whole parent
+        // environment was copied and only ANTHROPIC_BASE_URL was overridden —
+        // so a local server, or a colleague's box, received the real key.
+        {
+            let mut env = EnvGuard::new();
+            env.set("ANTHROPIC_API_KEY", "sk-user-real-key");
+            env.set("ANTHROPIC_AUTH_TOKEN", "sk-user-real-token");
+            env.remove("WSX_CLAUDE_MODEL");
+            let cmd = build(&ModelSelection {
+                base_url: Some("http://127.0.0.1:8091".into()),
+                ..Default::default()
+            });
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_API_KEY"),
+                None,
+                "an inherited key must not follow a redirect"
+            );
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_AUTH_TOKEN"),
+                None,
+                "an inherited token must not follow a redirect"
+            );
+        }
+
+        // With no redirect the user's own credentials are left exactly as they
+        // are — wsx has no business touching them on the default endpoint.
+        {
+            let mut env = EnvGuard::new();
+            env.set("ANTHROPIC_API_KEY", "sk-user-real-key");
+            env.remove("WSX_CLAUDE_MODEL");
+            let cmd = build(&ModelSelection::default());
+            assert_eq!(
+                cmd.get_env("ANTHROPIC_API_KEY").and_then(|v| v.to_str()),
+                Some("sk-user-real-key")
             );
         }
 

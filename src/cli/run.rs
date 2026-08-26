@@ -319,19 +319,7 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 store.delete_setting(&key)?;
                 println!("cleared {key}");
             } else {
-                let value = if key == "detail_bar_config" {
-                    detail_bar_config_validate_and_normalize(&value)?
-                } else if key == "usage_graph_window" {
-                    usage_window_validate_and_normalize(&value)?
-                } else if key == "model_profiles" {
-                    // Strict here and tolerant on read: this is the one moment
-                    // a malformed line can still be reported to the person who
-                    // typed it, and the one place a literal credential can be
-                    // refused before it reaches the database.
-                    crate::commands::model_profiles::validate(&value)?
-                } else {
-                    value
-                };
+                let value = normalize_setting(&key, value)?;
                 store.set_setting(&key, &value)?;
                 println!("set {key} ({} chars)", value.len());
             }
@@ -366,13 +354,7 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             } else if new_value == current {
                 println!("{key} unchanged");
             } else {
-                let normalized = if key == "detail_bar_config" {
-                    detail_bar_config_validate_and_normalize(&new_value)?
-                } else if key == "usage_graph_window" {
-                    usage_window_validate_and_normalize(&new_value)?
-                } else {
-                    new_value.clone()
-                };
+                let normalized = normalize_setting(&key, new_value.clone())?;
                 store.set_setting(&key, &normalized)?;
                 println!("set {key} ({} chars)", normalized.len());
             }
@@ -522,6 +504,7 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                         } else {
                             println!("pinned to model profile {name}");
                             warn_if_endpoint_unusable(&store, name, agent_kind);
+                            warn_if_token_visible_in_shared(&store, name, shared);
                         }
                     }
                     Ok(None) => eprintln!("warning: new workspace has no primary agent to pin"),
@@ -764,6 +747,7 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
                 Some(n) => {
                     println!("pinned to model profile {n} ({})", when_applies(&ws));
                     warn_if_endpoint_unusable(&store, n, target_agent);
+                    warn_if_token_visible_in_shared(&store, n, ws.shared);
                 }
                 None => println!("model profile cleared ({})", when_applies(&ws)),
             }
@@ -778,8 +762,20 @@ pub async fn run_cli(action: CliAction, dirs: &Dirs) -> Result<()> {
             // the pin paths do — this is the moment someone is present to hear
             // it.
             if let Some(profile) = inst.model_profile.as_deref() {
-                println!("  model: {profile} (inherited)");
-                warn_if_endpoint_unusable(&store, profile, agent);
+                // Only claim it if it still resolves. `add_workspace_agent`
+                // copies the pin verbatim, so a profile deleted since the
+                // workspace was pinned would otherwise be announced as the new
+                // agent's model while the spawn quietly falls back.
+                match crate::commands::model_profiles::lookup(&store, profile) {
+                    Ok(Some(_)) => {
+                        println!("  model: {profile} (inherited)");
+                        warn_if_endpoint_unusable(&store, profile, agent);
+                    }
+                    _ => println!(
+                        "  model: inherited pin '{profile}' no longer exists; \
+                         this agent will start on the default"
+                    ),
+                }
             }
         }
         CliAction::StatusSet { state, message } => {
@@ -983,11 +979,14 @@ fn warn_if_endpoint_unusable(
     };
     match agent.endpoint_support() {
         crate::pty::EndpointSupport::BaseUrl => {
-            if p.provider.is_some() {
+            // Claude is the only agent with no provider concept at all. pi
+            // forwards one as `--provider` / `--models "<p>/*"`, so a profile
+            // naming one there is doing something real and must not be warned
+            // about.
+            if p.provider.is_some() && agent == crate::pty::AgentKind::Claude {
                 eprintln!(
-                    "warning: profile '{profile}' sets provider, which only codex uses; \
-                     {} takes an endpoint by base_url instead",
-                    agent.display_name()
+                    "warning: profile '{profile}' sets provider, which claude has no concept \
+                     of; it takes an endpoint by base_url instead"
                 );
             }
         }
@@ -1044,7 +1043,27 @@ pub(super) fn inherited_model_profile(
     store: &crate::data::store::Store,
     parent: &crate::data::store::Workspace,
 ) -> Option<String> {
-    let target = store.primary_instance_id(parent.id).ok().flatten()?;
+    // The calling agent, not the workspace's primary. `WSX_AGENT_INSTANCE_ID`
+    // is exported to every spawned agent and is already used elsewhere in this
+    // module for sender attribution. A secondary agent pinned to a local
+    // endpoint would otherwise spawn children on the primary's profile — or on
+    // nothing — which is the same silent divergence this inheritance exists to
+    // prevent, one instance over.
+    let caller = std::env::var("WSX_AGENT_INSTANCE_ID")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .map(crate::data::store::AgentInstanceId)
+        .filter(|id| {
+            store
+                .workspace_agents_by_id(*id)
+                .ok()
+                .flatten()
+                .is_some_and(|i| i.workspace_id == parent.id)
+        });
+    let target = match caller {
+        Some(id) => id,
+        None => store.primary_instance_id(parent.id).ok().flatten()?,
+    };
     let name = store
         .workspace_agents_by_id(target)
         .ok()
@@ -1053,5 +1072,52 @@ pub(super) fn inherited_model_profile(
     match crate::commands::model_profiles::lookup(store, &name) {
         Ok(Some(_)) => Some(name),
         _ => None,
+    }
+}
+
+/// Validate and normalize a setting on its way into the database.
+///
+/// One function rather than a chain per write path. `config set` and
+/// `config edit` each had their own copy, and they had already drifted:
+/// `model_profiles` was validated on `set` and not on `edit`, so the editor —
+/// the command both of its own error messages recommend — would write a literal
+/// API key straight into `state.db`, past the guard whose entire purpose is to
+/// refuse one. A key added in future can now only be missed in one place.
+fn normalize_setting(key: &str, value: String) -> Result<String> {
+    match key {
+        "detail_bar_config" => detail_bar_config_validate_and_normalize(&value),
+        "usage_graph_window" => usage_window_validate_and_normalize(&value),
+        // Strict on write and tolerant on read: this is the one moment a
+        // malformed line can still be reported to the person who typed it, and
+        // the one place a literal credential can be refused before it lands in
+        // an unencrypted file that travels with a home directory.
+        "model_profiles" => crate::commands::model_profiles::validate(&value),
+        _ => Ok(value),
+    }
+}
+
+/// Warn when a profile's token would end up on a command line.
+///
+/// A tmux-shared workspace runs its agent inside a tmux server, and wsx
+/// forwards the child environment to it as `-e KEY=VALUE` argv elements
+/// (`pty::tmux::wrap_in_tmux`) — so anything in that environment is visible to
+/// `ps` and to `tmux show-environment`. That is pre-existing and applies to
+/// every variable, but a profile naming `auth_token_env` is wsx deliberately
+/// putting a credential there, which is worth saying out loud.
+///
+/// Not refused: a token for a server on the same machine is a different risk
+/// from one for a hosted API, and that judgement is the user's.
+fn warn_if_token_visible_in_shared(store: &crate::data::store::Store, profile: &str, shared: bool) {
+    if !shared {
+        return;
+    }
+    if let Ok(Some(p)) = crate::commands::model_profiles::lookup(store, profile)
+        && p.auth_token_env.is_some()
+    {
+        eprintln!(
+            "warning: this workspace is tmux-shared, and a shared workspace's environment is \
+             passed to tmux on its command line — the token from '{profile}' will be visible \
+             to `ps` and `tmux show-environment` on this machine"
+        );
     }
 }

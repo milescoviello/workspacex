@@ -124,7 +124,25 @@ impl Store {
             .primary_instance_id(ws)?
             .and_then(|id| self.workspace_agents_by_id(id).ok().flatten());
         let (model, provider, model_profile) = match inherited {
-            Some(p) => (p.model, p.provider, p.model_profile),
+            Some(p) => {
+                // A profile is kind-agnostic: it names an endpoint and a model
+                // and each builder takes what it can use. The raw `model` and
+                // `provider` are not — they were captured from
+                // `WSX_<KIND>_MODEL` for one specific agent, so handing pi's
+                // model to a claude instance produces `claude --model
+                // qwen3.8-27b`, which cannot start. Only carry them across when
+                // the kind matches.
+                //
+                // This matters most for the panel's `a` key, which adds one of
+                // every kind in a single press: four of the five would have come
+                // up broken, and nothing printed a word about it.
+                let same_kind = p.agent == agent;
+                (
+                    same_kind.then_some(p.model).flatten(),
+                    same_kind.then_some(p.provider).flatten(),
+                    p.model_profile,
+                )
+            }
             None => (None, None, None),
         };
         let now = now_ms();
@@ -425,10 +443,23 @@ mod store_tests {
             .set_instance_model(primary, Some("qwen3.8-27b"), Some("prov"))
             .unwrap();
 
+        // A profile crosses kinds — it names an endpoint and a model, and each
+        // builder takes what it can use.
         let added = store.add_workspace_agent(ws, AgentKind::Codex).unwrap();
         assert_eq!(added.model_profile.as_deref(), Some("local"));
-        assert_eq!(added.model.as_deref(), Some("qwen3.8-27b"));
-        assert_eq!(added.provider.as_deref(), Some("prov"));
+        // The raw model/provider do not: they were captured from
+        // `WSX_CLAUDE_MODEL` for a claude agent, and `codex --model
+        // qwen3.8-27b` cannot start.
+        assert_eq!(
+            added.model, None,
+            "a model captured for claude must not be handed to codex"
+        );
+        assert_eq!(added.provider, None);
+
+        // Same kind, so they do carry.
+        let same = store.add_workspace_agent(ws, AgentKind::Claude).unwrap();
+        assert_eq!(same.model.as_deref(), Some("qwen3.8-27b"));
+        assert_eq!(same.provider.as_deref(), Some("prov"));
 
         // …and it survives a round-trip, not just the returned struct.
         let read_back = store.workspace_agents_by_id(added.id).unwrap().unwrap();
