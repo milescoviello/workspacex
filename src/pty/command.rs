@@ -708,6 +708,14 @@ pub fn build_codex_command(
         cmd.arg("--oss");
         cmd.arg("--local-provider");
         cmd.arg(&provider);
+        // The provider flag alone reaches the *default* local port. A profile
+        // that also names a `base_url` redirects it — `CODEX_OSS_BASE_URL` is
+        // the variable codex honours here, verified against 0.149.1;
+        // `OLLAMA_HOST` and `OLLAMA_BASE_URL` are both ignored by this path.
+        // That is what lets a workspace use an ollama on another machine.
+        if let Some(base_url) = &selection.base_url {
+            cmd.env("CODEX_OSS_BASE_URL", base_url);
+        }
     }
 
     let model = selection.model_or_env("WSX_CODEX_MODEL");
@@ -1351,6 +1359,172 @@ mod tests {
             .map(|s| s.to_string_lossy().to_string())
             .collect();
         assert!(!args.iter().any(|a| a == "--add-dir"), "got: {args:?}");
+    }
+
+    /// Codex cannot be handed a URL on its own — a custom `model_providers`
+    /// entry accepts only `wire_api = "responses"` while local servers speak
+    /// chat-completions — so it is pointed by provider name, which is what
+    /// `--oss --local-provider` exists for. A `base_url` alongside that
+    /// redirects it to another host.
+    #[test]
+    fn build_codex_command_selects_a_local_provider_by_name() {
+        use crate::pty::ModelSelection;
+        let cwd = PathBuf::from(".");
+        let fresh = SpawnMode::Fresh {
+            rename_ctx: None,
+            custom_instructions: None,
+            doctrine: None,
+            additional_dirs: vec![],
+            yolo: false,
+        };
+        let build = |mode: &SpawnMode, sel: &ModelSelection| {
+            build_codex_command(
+                &cwd,
+                mode,
+                crate::agent::remote_control::RemoteOpts::disabled(),
+                sel,
+            )
+        };
+        let argv_of = |cmd: &CommandBuilder| -> Vec<String> {
+            cmd.get_argv()
+                .iter()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect()
+        };
+        let after = |a: &[String], flag: &str| -> Option<String> {
+            a.iter()
+                .position(|x| x == flag)
+                .and_then(|i| a.get(i + 1).cloned())
+        };
+
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_MODEL");
+            env.remove("WSX_CODEX_PROVIDER");
+            let sel = ModelSelection {
+                provider: Some("ollama".into()),
+                model: Some("qwen2.5:7b".into()),
+                ..Default::default()
+            };
+            let a = argv_of(&build(&fresh, &sel));
+            assert!(a.iter().any(|x| x == "--oss"), "{a:?}");
+            assert_eq!(
+                after(&a, "--local-provider").as_deref(),
+                Some("ollama"),
+                "{a:?}"
+            );
+            assert_eq!(after(&a, "-m").as_deref(), Some("qwen2.5:7b"), "{a:?}");
+        }
+
+        // A base_url alongside the provider redirects codex to another machine's
+        // ollama. `CODEX_OSS_BASE_URL` is the variable it honours, verified
+        // against 0.149.1; `OLLAMA_HOST` and `OLLAMA_BASE_URL` are ignored here.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let sel = ModelSelection {
+                provider: Some("ollama".into()),
+                base_url: Some("http://127.0.0.1:11435".into()),
+                ..Default::default()
+            };
+            let cmd = build(&fresh, &sel);
+            assert_eq!(
+                cmd.get_env("CODEX_OSS_BASE_URL").and_then(|v| v.to_str()),
+                Some("http://127.0.0.1:11435")
+            );
+        }
+
+        // Without a provider there is no `--oss` mode and codex never consults
+        // the variable, so setting it would misstate what will happen.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            env.remove("CODEX_OSS_BASE_URL");
+            let sel = ModelSelection {
+                base_url: Some("http://127.0.0.1:11435".into()),
+                ..Default::default()
+            };
+            let cmd = build(&fresh, &sel);
+            assert_eq!(cmd.get_env("CODEX_OSS_BASE_URL"), None);
+            assert!(!argv_of(&cmd).iter().any(|x| x == "--oss"));
+        }
+
+        // An unknown provider is not forwarded: codex accepts exactly two, and
+        // anything else would fail inside the agent rather than here.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let sel = ModelSelection {
+                provider: Some("some-gateway".into()),
+                ..Default::default()
+            };
+            assert!(!argv_of(&build(&fresh, &sel)).iter().any(|x| x == "--oss"));
+        }
+
+        // Resume restores the session's stored provider, so re-asserting the
+        // flag would fight it — the rule the `-c` overrides already follow.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let cont = SpawnMode::Continue {
+                custom_instructions: None,
+                doctrine: None,
+                additional_dirs: vec![],
+                yolo: false,
+            };
+            let sel = ModelSelection {
+                provider: Some("ollama".into()),
+                ..Default::default()
+            };
+            let a = argv_of(&build(&cont, &sel));
+            assert!(
+                !a.iter().any(|x| x == "--oss"),
+                "resume must not re-assert: {a:?}"
+            );
+        }
+    }
+
+    /// pi reads `LLAMA_BASE_URL` ("llama.cpp server URL") and has no
+    /// `--base-url` flag, so that is the one endpoint a profile can move for it.
+    #[test]
+    fn build_pi_command_points_at_a_llama_server() {
+        use crate::pty::ModelSelection;
+        let cwd = PathBuf::from(".");
+        let mode = SpawnMode::Fresh {
+            rename_ctx: None,
+            custom_instructions: None,
+            doctrine: None,
+            additional_dirs: vec![],
+            yolo: false,
+        };
+        let build = |sel: &ModelSelection| {
+            build_pi_command(
+                &cwd,
+                &mode,
+                crate::agent::remote_control::RemoteOpts::disabled(),
+                sel,
+            )
+        };
+
+        {
+            let _env = EnvGuard::new();
+            let cmd = build(&ModelSelection {
+                base_url: Some("http://127.0.0.1:11435/v1".into()),
+                ..Default::default()
+            });
+            assert_eq!(
+                cmd.get_env("LLAMA_BASE_URL").and_then(|v| v.to_str()),
+                Some("http://127.0.0.1:11435/v1")
+            );
+        }
+
+        // No endpoint in the profile leaves pi's own configuration alone.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("LLAMA_BASE_URL");
+            let cmd = build(&ModelSelection::default());
+            assert_eq!(cmd.get_env("LLAMA_BASE_URL"), None);
+        }
     }
 
     /// Pointing an agent at a local model server is the whole reason profiles

@@ -995,10 +995,13 @@ fn warn_if_endpoint_unusable(
         // speaks the Responses API, while local servers speak chat-completions
         // — so it is reached by provider name instead.
         crate::pty::EndpointSupport::LocalProvider => {
+            // A base_url alongside a provider is fine: it redirects the local
+            // provider to another host. A base_url *without* one does nothing,
+            // because codex only consults it in `--oss` mode.
             if p.base_url.is_some() && p.provider.is_none() {
                 eprintln!(
-                    "warning: profile '{profile}' sets base_url, but {} cannot be given an \
-                     arbitrary endpoint — set `provider=ollama` or `provider=lmstudio` instead",
+                    "warning: profile '{profile}' sets base_url with no provider, which {} \
+                     ignores — add `provider=ollama` or `provider=lmstudio` to use it",
                     agent.display_name()
                 );
             }
