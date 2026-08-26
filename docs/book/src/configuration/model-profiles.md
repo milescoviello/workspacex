@@ -28,9 +28,21 @@ gpu-box     base_url=http://gpu-box.lan:8091 model=qwen3.8-27b auth_token_env=GP
 | `provider` | Named local provider for agents pointed by name rather than URL: `ollama` or `lmstudio` |
 | `auth_token_env` | **Name** of an environment variable holding the token |
 | `max_context` | Context window to advertise, when it differs from the model's default. Must be greater than zero |
+| `reasoning` | Reasoning effort to request: `none`, `low`, `medium`, `high`, `max`. Only codex reads it |
 
 A profile must set at least one of `base_url` or `model`, or it would do
 nothing. Blank lines and `#` comments are ignored.
+
+### Write `base_url` as the bare server
+
+`base_url` is the server itself — `http://127.0.0.1:11434`, the line ollama or
+llama.cpp prints on startup — not an API path. Agents want different paths under
+it, so wsx appends what each one needs: codex's local providers speak the
+Responses API and post to `<base>/responses`, so wsx hands codex the
+OpenAI-compatible root `<base>/v1`, while claude and pi take the bare URL.
+
+A `base_url` that already has a path is passed through untouched, so a reverse
+proxy prefix or an explicit `/v1` still works.
 
 Everything is checked when the setting is written rather than when an agent
 spawns. A `base_url` with no scheme, or a `max_context` of zero, can only be a
@@ -50,11 +62,11 @@ what a profile can promise. Each row was established by reading the tool.
 | `hermes` | yes | no | its `config.yaml` beats anything wsx can set |
 | `omp` | yes | no | custom providers live in `~/.omp/agent/models.yml` |
 
-**Codex takes a provider name, not a URL.** A custom `model_providers` entry in
-codex only accepts `wire_api = "responses"` — 0.149.1 rejects `"chat"` — while
-local servers speak chat-completions, so a URL would load and then fail to talk.
-Codex ships `--oss --local-provider` for exactly this case, and a profile's
-`provider` field selects it:
+**Codex takes a provider name, not a URL.** It has no flag for an arbitrary
+endpoint; reaching one otherwise means writing a `model_providers` entry into
+`~/.codex/config.toml`, which is not wsx's file to edit. Codex ships
+`--oss --local-provider` for exactly this case, and a profile's `provider` field
+selects it:
 
 ```text
 local-ollama  provider=ollama model=qwen2.5:7b
@@ -67,10 +79,24 @@ to another machine — which is the point when the local GPU is busy:
 gpu-box  provider=ollama base_url=http://gpu-box.lan:11434 model=qwen2.5:7b
 ```
 
-wsx passes that as `CODEX_OSS_BASE_URL`, which is the variable codex honours
-here; `OLLAMA_HOST` and `OLLAMA_BASE_URL` are both ignored by this path. A
-`base_url` **without** a `provider` still warns, because codex only consults it
-in `--oss` mode and would otherwise look configured while changing nothing.
+wsx passes that as `CODEX_OSS_BASE_URL` — with `/v1` appended, since codex posts
+to `<base>/responses` — which is the variable codex honours here; `OLLAMA_HOST`
+and `OLLAMA_BASE_URL` are both ignored by this path. A `base_url` **without** a
+`provider` still warns, because codex only consults it in `--oss` mode and would
+otherwise look configured while changing nothing.
+
+Codex also asks for `xhigh` reasoning by default, which ollama refuses for every
+model it serves — `invalid reasoning value: "xhigh"` — so a local codex spawn
+sends `model_reasoning_effort=none` unless the profile names something else:
+
+```text
+gpu-box  provider=ollama base_url=http://gpu-box.lan:11434 model=qwen3-coder reasoning=high
+```
+
+`none` is the fallback because it is the only value that also works for a model
+with no thinking mode at all, which answers `"<model>" does not support thinking`
+to anything else. A codex spawn that is *not* redirected to a local provider is
+left alone — its effort is whatever the user configured.
 
 **Hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint as
 `argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins over
@@ -160,7 +186,9 @@ shows the live model and what will replace it:
 ▎ claude#2           [local-qwen]
 ```
 
-and the `model` detail-bar module says the same thing on its second line. To
+and the [`model` detail-bar module](../daily-use/detail-bar.md) says the same
+thing on its second line — it is off by default, so add it to a container first.
+To
 apply it now, restart that agent — archive and recreate the workspace, or kill
 the agent so it respawns.
 

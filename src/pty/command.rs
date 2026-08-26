@@ -44,6 +44,9 @@ pub struct ModelSelection {
     /// Context limit to advertise to the agent, for endpoints whose window
     /// differs from the model's default.
     pub max_context: Option<u64>,
+    /// Reasoning effort to request. Only the codex builder reads it, and only
+    /// on a local-provider spawn.
+    pub reasoning: Option<String>,
 }
 
 /// Trim and treat blank as absent. A shell expands `export FOO=$UNSET` to "",
@@ -617,6 +620,29 @@ fn toml_basic_string(s: &str) -> String {
     out
 }
 
+/// A base URL as codex's local providers address it: the OpenAI-compatible
+/// root, `.../v1`.
+///
+/// wsx profiles hold the bare server (`http://host:11434`), which is what
+/// claude and pi want and what a person reads off an ollama or llama.cpp
+/// startup line. Codex is the one agent needing the compat prefix — its local
+/// providers speak the Responses API and post to `<base>/responses` — so the
+/// translation lives here rather than in the profile, because one profile has
+/// to serve every agent.
+///
+/// A URL that already carries a path is left alone: someone who wrote `.../v1`
+/// or a reverse-proxy prefix meant it, and appending would break it.
+fn openai_compat_root(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    // Search from past `scheme://` so the scheme's own `//` is not read as a
+    // path separator.
+    let after_authority = trimmed.find("://").map(|i| i + 3).unwrap_or(0);
+    match trimmed[after_authority..].find('/') {
+        Some(_) => trimmed.to_string(),
+        None => format!("{trimmed}/v1"),
+    }
+}
+
 /// Build a `CommandBuilder` for `codex` (or whatever `WSX_CODEX_BIN` points to)
 /// inside `cwd`. Inherits the current process env.
 ///
@@ -705,12 +731,12 @@ pub fn build_codex_command(
         cmd.arg("--dangerously-bypass-approvals-and-sandbox");
     }
 
-    // A local model, by provider name rather than by URL. Codex cannot be given
-    // an arbitrary endpoint: a custom `model_providers` entry only accepts
-    // `wire_api = "responses"` (0.149.1 rejects "chat"), while local servers
-    // speak chat-completions — so a `base_url` would load and then fail to
-    // talk. `--oss --local-provider` is the path codex ships for this, and it
-    // is what a profile's `provider` selects.
+    // A local model, by provider name rather than by URL. Codex has no flag for
+    // an arbitrary endpoint at all; reaching one means writing a custom
+    // `model_providers` entry into its config file, which wsx has no business
+    // doing to a user's `~/.codex/config.toml`. `--oss --local-provider` is the
+    // path codex ships for exactly this, and it is what a profile's `provider`
+    // selects — the URL then rides along in the environment, below.
     //
     // Fresh-only, like the `-c` overrides above: `codex resume --last` restores
     // the session's stored provider and would fight a flag re-asserted here.
@@ -727,8 +753,18 @@ pub fn build_codex_command(
         // `OLLAMA_HOST` and `OLLAMA_BASE_URL` are both ignored by this path.
         // That is what lets a workspace use an ollama on another machine.
         if let Some(base_url) = &selection.base_url {
-            cmd.env("CODEX_OSS_BASE_URL", base_url);
+            cmd.env("CODEX_OSS_BASE_URL", openai_compat_root(base_url));
         }
+        // Codex defaults to `xhigh`, which no ollama-served model accepts —
+        // ollama answers `invalid reasoning value: "xhigh"` and the turn dies
+        // before the model is ever asked anything. A profile's own value wins;
+        // `none` is the fallback because it is the only one of ollama's five
+        // accepted values that works for a non-thinking model as well.
+        cmd.arg("-c");
+        cmd.arg(format!(
+            "model_reasoning_effort={}",
+            selection.reasoning.as_deref().unwrap_or("none")
+        ));
     }
 
     let model = selection.model_or_env("WSX_CODEX_MODEL");
@@ -1441,9 +1477,84 @@ mod tests {
                 ..Default::default()
             };
             let cmd = build(&fresh, &sel);
+            // With the OpenAI-compatible root appended: codex posts to
+            // `<base>/responses`, so the bare server 404s. Verified live —
+            // `http://127.0.0.1:11435` gave `404 page not found, url:
+            // http://127.0.0.1:11435/responses` against an ollama that answers
+            // `/v1/responses` with 200.
             assert_eq!(
                 cmd.get_env("CODEX_OSS_BASE_URL").and_then(|v| v.to_str()),
-                Some("http://127.0.0.1:11435")
+                Some("http://127.0.0.1:11435/v1")
+            );
+            // And the effort ollama will accept, since codex's own default
+            // (`xhigh`) is refused for every model it serves.
+            let a = argv_of(&cmd);
+            assert!(
+                a.iter().any(|x| x == "model_reasoning_effort=none"),
+                "{a:?}"
+            );
+        }
+
+        // An explicit path is the author's, not ours: a URL already carrying
+        // `/v1`, or sitting behind a reverse-proxy prefix, is passed through.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            for url in [
+                "http://127.0.0.1:11435/v1",
+                "https://gpu.lan/ollama/v1",
+                "http://127.0.0.1:11435/v1/",
+            ] {
+                let sel = ModelSelection {
+                    provider: Some("ollama".into()),
+                    base_url: Some(url.into()),
+                    ..Default::default()
+                };
+                let cmd = build(&fresh, &sel);
+                assert_eq!(
+                    cmd.get_env("CODEX_OSS_BASE_URL").and_then(|v| v.to_str()),
+                    Some(url.trim_end_matches('/')),
+                    "{url}"
+                );
+            }
+        }
+
+        // A profile that names an effort wins over the fallback: a thinking
+        // model served locally should still be allowed to think.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let sel = ModelSelection {
+                provider: Some("ollama".into()),
+                reasoning: Some("high".into()),
+                ..Default::default()
+            };
+            let a = argv_of(&build(&fresh, &sel));
+            assert!(
+                a.iter().any(|x| x == "model_reasoning_effort=high"),
+                "{a:?}"
+            );
+            assert!(
+                !a.iter().any(|x| x == "model_reasoning_effort=none"),
+                "{a:?}"
+            );
+        }
+
+        // No local provider, no effort override. A cloud codex spawn keeps
+        // whatever the user configured; `xhigh` is only a problem for a local
+        // server, and silently rewriting it everywhere would be a downgrade
+        // nobody asked for.
+        {
+            let mut env = EnvGuard::new();
+            env.remove("WSX_CODEX_PROVIDER");
+            let sel = ModelSelection {
+                reasoning: Some("high".into()),
+                ..Default::default()
+            };
+            let a = argv_of(&build(&fresh, &sel));
+            assert!(
+                !a.iter().any(|x| x.starts_with("model_reasoning_effort")),
+                "{a:?}"
             );
         }
 

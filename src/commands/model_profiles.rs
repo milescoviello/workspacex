@@ -28,11 +28,18 @@ pub struct ModelProfile {
     /// Name of an environment variable holding the token — never the token.
     pub auth_token_env: Option<String>,
     /// A named provider, for agents that reach a local server by name rather
-    /// than by URL. `codex` is the case: it cannot be given an arbitrary
-    /// `base_url` (custom providers only speak the Responses API) but ships
-    /// `--oss --local-provider ollama|lmstudio`.
+    /// than by URL. `codex` is the case: it has no flag for an arbitrary
+    /// `base_url`, but ships `--oss --local-provider ollama|lmstudio`, and a
+    /// `base_url` alongside one redirects it to another host.
     pub provider: Option<String>,
     pub max_context: Option<u64>,
+    /// Reasoning effort to ask the agent for. Only codex reads it, and only
+    /// when a profile redirects it to a local provider: codex's own default is
+    /// `xhigh`, which ollama rejects outright for every model it serves, so a
+    /// local codex spawn fails on the first turn unless this is set. Left
+    /// unset, the codex builder supplies `none` — the one value ollama accepts
+    /// for both thinking and non-thinking models.
+    pub reasoning: Option<String>,
 }
 
 /// Keys that would put a credential in the database. Rejected by name rather
@@ -46,12 +53,19 @@ const KNOWN_KEYS: &[&str] = &[
     "provider",
     "auth_token_env",
     "max_context",
+    "reasoning",
 ];
 
 /// Providers an agent can be pointed at by name. Kept to what a shipped agent
 /// actually implements — codex takes exactly these two — rather than accepting
 /// any string and failing later inside the agent.
 const KNOWN_PROVIDERS: &[&str] = &["ollama", "lmstudio"];
+
+/// Reasoning efforts a local endpoint will accept. Taken from what ollama
+/// 0.32.5 answers with when handed anything else — it names the whole valid set
+/// in its error — rather than from codex's own richer list, which includes
+/// values (`xhigh`) that only OpenAI's hosted models take.
+const KNOWN_REASONING: &[&str] = &["none", "low", "medium", "high", "max"];
 
 /// Parse one line. `Ok(None)` is a line with nothing in it (blank or comment);
 /// `Err` carries a message naming what is wrong with it.
@@ -138,6 +152,16 @@ fn parse_line(raw: &str) -> std::result::Result<Option<ModelProfile>, String> {
                 profile.provider = Some(value.to_string());
             }
             "auth_token_env" => profile.auth_token_env = Some(value.to_string()),
+            "reasoning" => {
+                if !KNOWN_REASONING.contains(&value) {
+                    return Err(format!(
+                        "reasoning in profile '{}' must be one of {}, got '{value}'",
+                        profile.name,
+                        KNOWN_REASONING.join(", ")
+                    ));
+                }
+                profile.reasoning = Some(value.to_string());
+            }
             "max_context" => {
                 let n = value.parse::<u64>().map_err(|_| {
                     format!(
@@ -276,6 +300,7 @@ pub fn selection_for(
             base_url: p.base_url,
             auth_token_env: p.auth_token_env,
             max_context: p.max_context,
+            reasoning: p.reasoning,
         },
         None => crate::pty::ModelSelection {
             model: instance.model.clone(),
@@ -564,6 +589,24 @@ mod tests {
     fn max_context_must_be_positive() {
         let err = validate("p model=m max_context=0").unwrap_err().to_string();
         assert!(err.contains("greater than zero"), "{err}");
+    }
+
+    /// Refused at write time against the set a local server accepts, not
+    /// codex's own — codex takes `xhigh`, ollama answers
+    /// `invalid reasoning value: "xhigh"` and kills the turn, and the point of
+    /// the field is to be a value that works.
+    #[test]
+    fn reasoning_must_be_one_of_the_accepted_efforts() {
+        let err = validate("p model=m reasoning=xhigh")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("reasoning"), "{err}");
+        assert!(err.contains("none"), "{err}");
+
+        for effort in ["none", "low", "medium", "high", "max"] {
+            let ps = parse(&format!("p model=m reasoning={effort}"));
+            assert_eq!(ps[0].reasoning.as_deref(), Some(effort), "{effort}");
+        }
     }
 
     #[test]

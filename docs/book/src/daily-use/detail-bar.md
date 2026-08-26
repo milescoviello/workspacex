@@ -59,6 +59,15 @@ dashboard's agent column is a colour strip with room for one bar per agent and
 no text, so a workspace pointed at a local endpoint looks exactly like one on
 the default.
 
+`model` is **not in the default layout**, since a workspace that has never been
+pinned to a profile has nothing interesting to say. Add it to a container to
+turn it on:
+
+```bash
+wsx config set detail_bar_config \
+  '{"containers": [["session_summary"], ["recent_chat"], ["processes", "recent_files"], ["model"]]}'
+```
+
 `session_summary` leads with the workspace's recap — the same
 `goal` / `state` / `next` the Project Manager pane shows, one labeled
 line per populated field, wrapped to the column:

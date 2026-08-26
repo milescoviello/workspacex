@@ -977,6 +977,16 @@ fn warn_if_endpoint_unusable(
     let Ok(Some(p)) = crate::commands::model_profiles::lookup(store, profile) else {
         return;
     };
+    // `reasoning` exists for exactly one case — codex against a local provider,
+    // whose default effort ollama rejects — so on any other agent it is a field
+    // that silently does nothing.
+    if p.reasoning.is_some() && agent != crate::pty::AgentKind::Codex {
+        eprintln!(
+            "warning: profile '{profile}' sets reasoning, which only codex reads; \
+             {} will ignore it",
+            agent.display_name()
+        );
+    }
     match agent.endpoint_support() {
         crate::pty::EndpointSupport::BaseUrl => {
             // Claude is the only agent with no provider concept at all. pi
@@ -990,9 +1000,8 @@ fn warn_if_endpoint_unusable(
                 );
             }
         }
-        // Codex cannot take an arbitrary URL — a custom provider entry only
-        // speaks the Responses API, while local servers speak chat-completions
-        // — so it is reached by provider name instead.
+        // Codex has no flag for an arbitrary URL; it is reached by provider
+        // name, and the profile's `base_url` then redirects that provider.
         crate::pty::EndpointSupport::LocalProvider => {
             // A base_url alongside a provider is fine: it redirects the local
             // provider to another host. A base_url *without* one does nothing,
