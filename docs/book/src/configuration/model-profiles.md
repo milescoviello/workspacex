@@ -46,7 +46,7 @@ what a profile can promise. Each row was established by reading the tool.
 | --- | --- | --- | --- |
 | `claude` | yes | **`base_url`** | `ANTHROPIC_BASE_URL` in the environment |
 | `pi` | yes | **`base_url`** | `LLAMA_BASE_URL` — llama.cpp servers |
-| `codex` | yes | **`provider`** | `--oss --local-provider ollama\|lmstudio` |
+| `codex` | yes | **`provider`** (+ optional `base_url`) | `--oss --local-provider ollama\|lmstudio`, redirected by `CODEX_OSS_BASE_URL` |
 | `hermes` | yes | no | its `config.yaml` beats anything wsx can set |
 | `omp` | yes | no | custom providers live in `~/.omp/agent/models.yml` |
 
@@ -59,6 +59,18 @@ Codex ships `--oss --local-provider` for exactly this case, and a profile's
 ```text
 local-ollama  provider=ollama model=qwen2.5:7b
 ```
+
+That alone reaches the **default** local port. Adding a `base_url` redirects it
+to another machine — which is the point when the local GPU is busy:
+
+```text
+gpu-box  provider=ollama base_url=http://gpu-box.lan:11434 model=qwen2.5:7b
+```
+
+wsx passes that as `CODEX_OSS_BASE_URL`, which is the variable codex honours
+here; `OLLAMA_HOST` and `OLLAMA_BASE_URL` are both ignored by this path. A
+`base_url` **without** a `provider` still warns, because codex only consults it
+in `--oss` mode and would otherwise look configured while changing nothing.
 
 **Hermes and omp cannot be moved per spawn.** Hermes resolves its endpoint as
 `argument or config.yaml or OPENROUTER_BASE_URL`, so the config file wins over
