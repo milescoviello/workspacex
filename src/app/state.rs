@@ -287,20 +287,6 @@ impl App {
         session.spawned_model.clone()
     }
 
-    /// The endpoint an instance *would* use on its next spawn, from its pin.
-    /// Differs from [`Self::instance_running_endpoint`] exactly when a pin has
-    /// been changed since the agent started.
-    pub fn instance_pinned_endpoint(
-        &self,
-        inst: &crate::data::agents::AgentInstance,
-    ) -> Option<&str> {
-        let name = inst.model_profile.as_deref()?;
-        self.model_profiles
-            .iter()
-            .find(|p| p.name == name)
-            .and_then(|p| p.base_url.as_deref())
-    }
-
     /// What an instance would spawn on next, when that differs from what it is
     /// running now — otherwise `None`, because saying it twice is noise.
     ///
@@ -1161,9 +1147,12 @@ mod strip_instances_tests {
             None,
             "still on the cloud"
         );
+        // The pin is real and has not taken effect — which `pending_model`
+        // reports, rather than a raw accessor that ignored whether the agent
+        // could use an endpoint at all.
         assert_eq!(
-            app.instance_pinned_endpoint(&row),
-            Some(LOCAL),
+            app.pending_model(&row).as_deref(),
+            Some("local"),
             "the pin is real, it just has not taken effect"
         );
     }

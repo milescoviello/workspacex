@@ -1083,7 +1083,7 @@ pub(super) fn inherited_model_profile(
 /// the command both of its own error messages recommend — would write a literal
 /// API key straight into `state.db`, past the guard whose entire purpose is to
 /// refuse one. A key added in future can now only be missed in one place.
-fn normalize_setting(key: &str, value: String) -> Result<String> {
+pub(super) fn normalize_setting(key: &str, value: String) -> Result<String> {
     match key {
         "detail_bar_config" => detail_bar_config_validate_and_normalize(&value),
         "usage_graph_window" => usage_window_validate_and_normalize(&value),

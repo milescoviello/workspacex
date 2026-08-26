@@ -2038,3 +2038,30 @@ fn a_child_workspace_inherits_the_parents_model_profile() {
         .unwrap();
     assert_eq!(inherited_model_profile(&store, &parent_ws), None);
 }
+
+/// `config set` and `config edit` must both route through the same validator.
+/// They did not: `edit` — the command the feature's own error messages
+/// recommend — wrote a literal API key straight into `state.db`, past the guard
+/// whose whole purpose is to refuse one. A revert of either path alone is
+/// invisible unless both are asserted here.
+#[test]
+fn both_config_write_paths_refuse_a_literal_credential() {
+    use crate::cli::run::normalize_setting;
+    let creds = "gpu base_url=https://api.example.com api_key=sk-live-SECRET".to_string();
+
+    let err = normalize_setting("model_profiles", creds.clone())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("api_key"), "{err}");
+    assert!(err.contains("auth_token_env"), "should name the fix: {err}");
+
+    // A valid value passes through untouched…
+    let ok = "gpu base_url=https://api.example.com auth_token_env=TOK".to_string();
+    assert_eq!(normalize_setting("model_profiles", ok.clone()).unwrap(), ok);
+
+    // …and an unrelated key is not validated as profiles.
+    assert_eq!(
+        normalize_setting("terminal_cmd", creds.clone()).unwrap(),
+        creds
+    );
+}

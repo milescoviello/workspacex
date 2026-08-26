@@ -346,6 +346,43 @@ mod tests {
         assert_eq!(sel.base_url.as_deref(), Some("http://127.0.0.1:8091"));
     }
 
+    /// Every field a profile can set has to survive the trip into
+    /// `ModelSelection`, not just the three the precedence tests happen to
+    /// check. Replace the `auth_token_env` and `max_context` lines with
+    /// `..Default::default()` and nothing else in the suite notices, while
+    /// users silently lose their token and context-window override.
+    #[test]
+    fn selection_for_carries_every_field_of_the_profile() {
+        let (store, id) = seed(
+            "full base_url=http://127.0.0.1:8091 model=qwen3.8-27b provider=ollama \
+             auth_token_env=SOME_VAR max_context=212992",
+        );
+        store.set_instance_model_profile(id, Some("full")).unwrap();
+        let sel = selection_for(&list(&store).unwrap(), &instance(&store, id));
+        assert_eq!(sel.base_url.as_deref(), Some("http://127.0.0.1:8091"));
+        assert_eq!(sel.model.as_deref(), Some("qwen3.8-27b"));
+        assert_eq!(sel.provider.as_deref(), Some("ollama"));
+        assert_eq!(sel.auth_token_env.as_deref(), Some("SOME_VAR"));
+        assert_eq!(sel.max_context, Some(212_992));
+    }
+
+    /// Cycling order is `list()`'s order, which sorts by name. Every other
+    /// fixture happens to be alphabetical already, so nothing would catch the
+    /// sort being dropped — and the `^p` / `p` / `m` cycles would silently
+    /// reorder under users.
+    #[test]
+    fn list_sorts_by_name_rather_than_file_order() {
+        let store = crate::data::store::Store::open_in_memory().unwrap();
+        store
+            .set_setting(
+                "model_profiles",
+                "zeta model=z\nalpha model=a\nmiddle model=m",
+            )
+            .unwrap();
+        let names: Vec<String> = list(&store).unwrap().into_iter().map(|p| p.name).collect();
+        assert_eq!(names, vec!["alpha", "middle", "zeta"]);
+    }
+
     /// `base_url` alone is a legitimate profile — "same model, different
     /// machine" — so a profile without a model must not erase the captured one.
     #[test]

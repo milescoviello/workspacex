@@ -808,10 +808,26 @@ pub fn spawn_session(
             None
         }
     };
+    // `tmux new-session -A` attaches to a surviving session instead of running
+    // the command, so on a re-attach none of the above reaches the agent — it
+    // is still the process started earlier, with the environment it was born
+    // with. Recording anything here would claim a change that did not happen,
+    // and would then suppress the "on tmux restart" notice that says so.
+    let reattaching = tmux.is_some_and(crate::pty::tmux::has_session);
+    let (spawned_model, spawned_endpoint) = if reattaching {
+        (None, None)
+    } else {
+        (spawned_model, spawned_endpoint)
+    };
+
     // Only the agents that actually select a backend by name record one.
-    let spawned_provider = agent
-        .provider_env()
-        .and_then(|var| selection.provider_or_env(var));
+    let spawned_provider = (!reattaching)
+        .then(|| {
+            agent
+                .provider_env()
+                .and_then(|var| selection.provider_or_env(var))
+        })
+        .flatten();
     let mut session = spawn_command_session(child_cmd, cols, rows, agent, reportable, tmux)?;
     session.spawned_model = spawned_model;
     session.spawned_endpoint = spawned_endpoint;

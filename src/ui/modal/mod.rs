@@ -256,9 +256,12 @@ pub fn render(
             let agent_label = agent.display_name();
             // Named even when unset: a line that only appears once a profile is
             // chosen would never tell anyone the key exists.
+            // Truncated like every other value in this box: the modal is a
+            // fixed 60 columns and a long profile name would otherwise run past
+            // the border and be clipped by ratatui.
             let model_line = format!(
                 "model: {}  [^p] cycles\n",
-                profile.as_deref().unwrap_or("(agent default)")
+                crate::ui::text::truncate(profile.as_deref().unwrap_or("(agent default)"), 34)
             );
             let shared_line = if *shared {
                 "shared (tmux): on — ^s toggles\n"
