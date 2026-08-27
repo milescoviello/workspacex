@@ -1516,7 +1516,41 @@ mod tests {
             .conn()
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 24);
+        assert_eq!(v, 25);
+    }
+
+    /// Every column the ladder adds after v22 is present together.
+    ///
+    /// The model columns and upstream's `scm_cache.pr_unresolved` were both
+    /// written as `if v < 23` on separate branches. `SCHEMA_V1` resets
+    /// `user_version` to 1 on every open, so the ladder replays from the
+    /// bottom and the duplicate number did not actually lose a column — but
+    /// two blocks claiming one version is still incoherent, and a merge is
+    /// exactly where it stops being harmless. This asserts the merged result
+    /// rather than the numbering, so it holds however the ladder is renumbered
+    /// next.
+    #[test]
+    fn the_ladder_adds_every_post_v22_column() {
+        let store = Store::open_in_memory().unwrap();
+        store.migrate_for_test().unwrap();
+        let columns = |table: &str| -> Vec<String> {
+            let conn = store.conn();
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        let agents = columns("workspace_agents");
+        for col in ["model", "provider", "model_profile"] {
+            assert!(agents.contains(&col.to_string()), "workspace_agents.{col}");
+        }
+        assert!(
+            columns("scm_cache").contains(&"pr_unresolved".to_string()),
+            "scm_cache.pr_unresolved"
+        );
     }
 
     #[test]
